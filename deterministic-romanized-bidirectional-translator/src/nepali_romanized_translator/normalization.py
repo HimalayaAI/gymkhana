@@ -3,6 +3,10 @@ from __future__ import annotations
 import re
 
 
+DEVANAGARI_PLACEHOLDER_PREFIX = "nrt"
+EXISTING_ROMAN_PLACEHOLDER_PREFIX = "romterm"
+ROMANIZED_OVERRIDE_PLACEHOLDER_PREFIX = "NRTDEV"
+
 DEVANAGARI_TO_ROMANIZED_OVERRIDES = {
     # Technical terms that should stay in the language users expect.
     "एआई": "AI",
@@ -325,8 +329,13 @@ def protect_devanagari_terms(
     text: str,
     overrides: dict[str, str] | None = None,
     *,
-    prefix: str = "nrt",
+    prefix: str = DEVANAGARI_PLACEHOLDER_PREFIX,
 ) -> tuple[str, dict[str, str]]:
+    """Replace known Devanagari terms before phonetic romanization.
+
+    These placeholders are restored after romanization and optional lowercasing,
+    so the returned placeholder map must be passed to ``restore_placeholders``.
+    """
     replacements = overrides or DEVANAGARI_TO_ROMANIZED_OVERRIDES
     placeholders: dict[str, str] = {}
     protected = text
@@ -345,8 +354,9 @@ def protect_existing_roman_terms(
     text: str,
     terms: tuple[str, ...] = PRESERVED_ROMAN_TERMS,
     *,
-    prefix: str = "romterm",
+    prefix: str = EXISTING_ROMAN_PLACEHOLDER_PREFIX,
 ) -> tuple[str, dict[str, str]]:
+    """Preserve Latin terms that already appear in mixed-script input."""
     placeholders: dict[str, str] = {}
     protected = text
     for index, term in enumerate(sorted(terms, key=len, reverse=True)):
@@ -360,6 +370,11 @@ def protect_existing_roman_terms(
 
 
 def restore_placeholders(text: str, placeholders: dict[str, str]) -> str:
+    """Restore placeholder values after transformations.
+
+    Devanagari romanization may lowercase intermediate text, so restoration checks
+    both the original placeholder and its lowercased form.
+    """
     restored = text
     for placeholder, value in placeholders.items():
         restored = restored.replace(placeholder.lower(), value)
@@ -368,6 +383,7 @@ def restore_placeholders(text: str, placeholders: dict[str, str]) -> str:
 
 
 def protect_roman_terms(text: str, terms: tuple[str, ...] = PRESERVED_ROMAN_TERMS) -> str:
+    """Wrap preserved Latin terms so romanized-to-Devanagari conversion skips them."""
     protected = text
     for term in sorted(terms, key=len, reverse=True):
         protected = re.sub(
@@ -383,8 +399,9 @@ def protect_romanized_overrides(
     text: str,
     overrides: dict[str, str] | None = None,
     *,
-    prefix: str = "ZXQDEV",
+    prefix: str = ROMANIZED_OVERRIDE_PLACEHOLDER_PREFIX,
 ) -> tuple[str, dict[str, str]]:
+    """Apply exact romanized overrides before the phonetic fallback runs."""
     replacements = overrides or ROMANIZED_TO_DEVANAGARI_OVERRIDES
     placeholders: dict[str, str] = {}
     protected = text

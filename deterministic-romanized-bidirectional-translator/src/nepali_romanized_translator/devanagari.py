@@ -9,6 +9,13 @@ from .normalization import (
     protect_existing_roman_terms,
     restore_placeholders,
 )
+from .tables import (
+    DEVANAGARI_CONSONANTS,
+    DEVANAGARI_DIACRITICS,
+    DEVANAGARI_INDEPENDENT_VOWELS,
+    DEVANAGARI_MARKS,
+    DEVANAGARI_TO_ROMAN_CHARACTERS,
+)
 
 
 LOAN_WORDS = {
@@ -72,65 +79,8 @@ HIGH_CONFIDENCE_WORDS = {
 
 PREDEFINED = {**LOAN_WORDS, **HIGH_CONFIDENCE_WORDS}
 
-KARS = {
-    "ा",
-    "ि",
-    "ी",
-    "ु",
-    "ू",
-    "े",
-    "ै",
-    "ो",
-    "ौ",
-    "ं",
-    "ँ",
-    "्",
-    "ृ",
-    "ः",
-}
-
-CONSONANTS = {
-    "क",
-    "ख",
-    "ग",
-    "घ",
-    "ङ",
-    "च",
-    "छ",
-    "ज",
-    "झ",
-    "ञ",
-    "ट",
-    "ठ",
-    "ड",
-    "ढ",
-    "ण",
-    "त",
-    "थ",
-    "द",
-    "ध",
-    "न",
-    "प",
-    "फ",
-    "ब",
-    "भ",
-    "म",
-    "य",
-    "र",
-    "ल",
-    "व",
-    "श",
-    "ष",
-    "स",
-    "ह",
-    "क्ष",
-    "त्र",
-    "ज्ञ",
-}
-
-VOWELS = {"अ", "आ", "इ", "ई", "उ", "ऊ", "ए", "ऐ", "ओ", "औ"}
-BINDUS = {"ँ", "ं", "ः"}
 DEVANAGARI_WORD_RE = re.compile(r"[\u0900-\u097f.]+")
+MIN_SUFFIX_STEM_BASES = 2
 
 SUFFIXES = (
     "द्वारा",
@@ -149,80 +99,6 @@ SUFFIXES = (
     "मा",
     "कै",
 )
-
-CHARACTER_MAP = {
-    "क": "ka",
-    "ख": "kha",
-    "ग": "ga",
-    "घ": "gha",
-    "ङ": "na",
-    "च": "cha",
-    "छ": "chha",
-    "ज": "ja",
-    "झ": "jha",
-    "ञ": "na",
-    "ट": "ta",
-    "ठ": "tha",
-    "ड": "da",
-    "ढ": "dha",
-    "ण": "na",
-    "त": "ta",
-    "थ": "tha",
-    "द": "da",
-    "ध": "dha",
-    "न": "na",
-    "प": "pa",
-    "फ": "pha",
-    "ब": "ba",
-    "भ": "bha",
-    "म": "ma",
-    "य": "ya",
-    "र": "ra",
-    "ल": "la",
-    "व": "wa",
-    "श": "sha",
-    "ष": "sha",
-    "स": "sa",
-    "ह": "ha",
-    "ा": "a",
-    "ि": "i",
-    "ी": "i",
-    "ु": "u",
-    "ू": "u",
-    "े": "e",
-    "ै": "ai",
-    "ो": "o",
-    "ौ": "au",
-    "ं": "an",
-    "ः": "ah",
-    "ँ": "an",
-    "अ": "a",
-    "आ": "aa",
-    "इ": "i",
-    "ई": "i",
-    "उ": "u",
-    "ऊ": "oo",
-    "ए": "e",
-    "ऐ": "ai",
-    "ओ": "o",
-    "औ": "au",
-    "्": "",
-    "ृ": "ri",
-    "ॠ": "ri",
-    "ऋ": "ri",
-    "ॐ": "om",
-    "०": "0",
-    "१": "1",
-    "२": "2",
-    "३": "3",
-    "४": "4",
-    "५": "5",
-    "६": "6",
-    "७": "7",
-    "८": "8",
-    "९": "9",
-    "।": ".",
-}
 
 
 @dataclass(frozen=True)
@@ -273,23 +149,36 @@ class DevanagariRomanizer:
         while changed:
             changed = False
             for suffix in SUFFIXES:
-                if stem.endswith(suffix) and len(stem) > len(suffix):
-                    stem = stem[: -len(suffix)]
-                    suffixes.insert(0, suffix)
-                    changed = True
-                    break
+                if not stem.endswith(suffix):
+                    continue
+                candidate = stem[: -len(suffix)]
+                if not self._can_split_suffix(candidate):
+                    continue
+                stem = candidate
+                suffixes.insert(0, suffix)
+                changed = True
+                break
         return stem, suffixes
+
+    def _can_split_suffix(self, stem: str) -> bool:
+        if not stem:
+            return False
+        if stem in PREDEFINED:
+            return True
+        base_count = sum(char not in DEVANAGARI_MARKS for char in stem)
+        return base_count >= MIN_SUFFIX_STEM_BASES
 
     def _romanize_stem(self, word: str) -> str:
         output: list[str] = []
         length = len(word)
         for index, char in enumerate(word):
-            transliterated = CHARACTER_MAP.get(char, char)
-            if char in BINDUS and index > 0 and (
-                word[index - 1] in KARS or word[index - 1] in VOWELS
+            transliterated = DEVANAGARI_TO_ROMAN_CHARACTERS.get(char, char)
+            if char in DEVANAGARI_DIACRITICS and index > 0 and (
+                word[index - 1] in DEVANAGARI_MARKS
+                or word[index - 1] in DEVANAGARI_INDEPENDENT_VOWELS
             ):
                 transliterated = "" if index == length - 1 else transliterated[1:]
-            if char in CONSONANTS:
+            if char in DEVANAGARI_CONSONANTS:
                 transliterated = self._apply_inherent_vowel_rule(
                     word, char, index, transliterated
                 )
@@ -303,7 +192,7 @@ class DevanagariRomanizer:
         index: int,
         transliterated: str,
     ) -> str:
-        if index < len(word) - 1 and word[index + 1] in KARS:
+        if index < len(word) - 1 and word[index + 1] in DEVANAGARI_MARKS:
             if transliterated.endswith("a"):
                 return transliterated[:-1]
             return transliterated
@@ -321,10 +210,10 @@ class DevanagariRomanizer:
         prev = word[index - 1]
         if char in {"छ", "य", "ह"}:
             return True
-        if prev == "्" or prev in BINDUS:
+        if prev == "्" or prev in DEVANAGARI_DIACRITICS:
             return True
         if prev == "े" and char == "र" and len(word) > 3:
             return True
         if char == "न":
             return True
-        return prev in VOWELS
+        return prev in DEVANAGARI_INDEPENDENT_VOWELS
