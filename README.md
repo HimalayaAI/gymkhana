@@ -48,6 +48,7 @@ than provider SDKs.
 
 | Environment | Task family |
 | --- | --- |
+| `romanized-nepali` | Bidirectional Nepali Devanagari/romanized transliteration |
 | `ifeval` | Verifiable instruction-following constraints |
 | `math-python` | Mathematical problem solving with a Python sandbox |
 | `hotpotqa` | Multi-hop question answering |
@@ -76,11 +77,12 @@ cp .env.example .env
 ## Generate rollout data
 
 The CLI uses each environment's default configuration and accepts model, task,
-and rollout overrides. This example runs four Claude candidates per IFEval task:
+and rollout overrides. This example runs four Claude candidates per Romanized
+Nepali task:
 
 ```bash
 python -m gymkhana.run \
-  --env ifeval \
+  --env romanized-nepali \
   --model anthropic:claude-sonnet-5 \
   --client anthropic \
   --limit 2 \
@@ -89,6 +91,15 @@ python -m gymkhana.run \
 
 `--num-rollouts` controls the group size `G`. `--batch-size` controls how many
 different tasks can run concurrently. Provider calls may incur cost.
+
+For a bounded live smoke test that prints every candidate and reward:
+
+```bash
+python scripts/smoke_test_romanized_nepali.py --group-size 2
+```
+
+The smoke test requires `ANTHROPIC_API_KEY` and optionally reads
+`ANTHROPIC_MODEL` from `.env`. It never prints the credential.
 
 ### Programmatic rollout groups
 
@@ -121,6 +132,27 @@ for candidate in group.candidates:
 
 Candidates retain their task ID, rollout-group ID, and ordered sample index so
 rewards and exports can be compared within the correct group.
+
+## Romanized Nepali: LLM policy, deterministic verifier
+
+`romanized-nepali` adapts the bidirectional translator contributed in
+[Gymkhana PR #1](https://github.com/HimalayaAI/gymkhana/pull/1). It supports
+Devanagari → romanized Nepali and romanized Nepali → Devanagari.
+
+The environment deliberately separates policy generation from verification:
+
+- Pydantic AI sends the task to the configured LLM for every rollout.
+- A curated dataset reference is used whenever one is present.
+- The deterministic translator supplies a bootstrap reference only when a row
+  has no curated reference; it is not exposed to the LLM as a tool.
+- The verifier compares the LLM output with the reference using normalized exact
+  match and edit similarity for a graded non-exact reward.
+
+Because Nepali can have several reasonable Romanizations, deterministic fallback
+references are best treated as bootstrap labels. Production datasets should
+prefer reviewed references or an explicitly documented variant-aware verifier.
+Original acknowledgments, license, and third-party notices are retained under
+`gymkhana/envs/romanized_nepali/`.
 
 ## Contributing a new environment
 

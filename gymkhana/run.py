@@ -25,7 +25,7 @@ def main():
     )
     parser.add_argument(
         "--env",
-        choices=["math-python", "oolong", "code", "hotpotqa", "swe", "ifeval", "tool-use-singleturn"],
+        choices=["math-python", "oolong", "code", "hotpotqa", "swe", "ifeval", "tool-use-singleturn", "romanized-nepali"],
         default=None,
         help="Task environment (overrides config)"
     )
