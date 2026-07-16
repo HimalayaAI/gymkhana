@@ -1,0 +1,1656 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <title>Gymkhana Gymboard</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/plotly.js/2.27.1/plotly.min.js"></script>
+    <link rel="stylesheet" href="/static/styles.css">
+    <style>
+        .collapsed-view {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 12px;
+            background: #f8f9fa;
+            border: 1px solid #e9ecef;
+            border-radius: 6px;
+            cursor: pointer;
+            font-family: 'Roboto Mono', monospace;
+            font-size: 13px;
+            color: #495057;
+            transition: all 0.2s ease;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            max-width: 100%;
+        }
+
+        .collapsed-view:hover {
+            background: #e2e6ea;
+            border-color: #dee2e6;
+        }
+
+        .collapsed-icon {
+            color: #6c757d;
+            font-size: 16px;
+        }
+
+        .message-count {
+            background: #e9ecef;
+            padding: 2px 6px;
+            border-radius: 10px;
+            font-size: 11px;
+            font-weight: bold;
+            color: #495057;
+        }
+
+        .conversation-container {
+            background: #fff;
+            border: 1px solid #dee2e6;
+            border-radius: 8px;
+            padding: 16px;
+            max-height: 600px;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.05);
+            margin-top: 8px;
+        }
+
+        .bubble {
+            padding: 6px 10px;
+            border-radius: 6px;
+            max-width: 95%;
+            line-height: 1.4;
+            font-size: 13px;
+            position: relative;
+            box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+            word-break: break-word;
+        }
+
+        .bubble-content {
+            white-space: pre-wrap;
+            /* Preserve formatting only for content */
+        }
+
+        .role-label {
+            font-size: 10px;
+            margin-bottom: 0px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            display: block;
+            opacity: 0.9;
+            font-weight: bold;
+        }
+
+        .role-system .role-label {
+            color: #c62828;
+        }
+
+        /* Crimson */
+        .role-user .role-label,
+        .role-human .role-label {
+            color: #2e7d32;
+        }
+
+        /* Forest Green */
+        .role-assistant .role-label,
+        .role-gpt .role-label,
+        .role-model .role-label {
+            color: #1565c0;
+        }
+
+        /* Ocean Blue */
+        .role-tool .role-label,
+        .role-environment .role-label {
+            color: #37474f;
+        }
+
+        /* Slate */
+
+        .role-system {
+            align-self: flex-start;
+            background: #fffcf0;
+            color: #5d4037;
+            text-align: left;
+            max-width: 100%;
+            border: 1px solid #ffeeba;
+            font-family: 'Roboto Mono', monospace;
+            font-size: 12px;
+            width: 100%;
+        }
+
+        .role-user,
+        .role-human {
+            align-self: flex-end;
+            background: #e3f2fd;
+            color: #0d47a1;
+            border-bottom-right-radius: 2px;
+            border: 1px solid #bbdefb;
+        }
+
+        .role-assistant,
+        .role-gpt,
+        .role-model {
+            align-self: flex-start;
+            background: #f5f0ff;
+            color: #311b92;
+            border-bottom-left-radius: 2px;
+            border: 1px solid #d1c4e9;
+        }
+
+        .role-tool,
+        .role-environment {
+            align-self: flex-start;
+            background: #fcfcfc;
+            color: #212529;
+            font-family: 'Roboto Mono', monospace;
+            font-size: 12px;
+            border: 1px solid #eceff1;
+            width: 100%;
+        }
+
+        .view-toggle {
+            display: flex;
+            justify-content: flex-end;
+            margin-bottom: 4px;
+        }
+
+        .toggle-btn {
+            font-size: 12px;
+            color: #564caf;
+            cursor: pointer;
+            background: none;
+            border: none;
+            padding: 4px 8px;
+        }
+
+        .toggle-btn:hover {
+            text-decoration: underline;
+        }
+
+        /* Table Container for Sticky Header */
+        .table-container {
+            max-height: 85vh;
+            overflow: auto;
+            position: relative;
+            background: #fff;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1);
+            border: 1px solid #e1e4e8;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            table-layout: auto;
+            margin-bottom: 20px;
+        }
+
+        th {
+            background: #f1f3f5 !important;
+            color: #495057;
+            font-weight: 600;
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            padding: 12px 15px !important;
+            border-bottom: 2px solid #dee2e6 !important;
+            white-space: nowrap;
+            text-align: left;
+        }
+
+        td {
+            padding: 10px 15px !important;
+            border-bottom: 1px solid #f1f3f5 !important;
+            font-size: 13px;
+        }
+
+        /* Badge System */
+        .badge {
+            display: inline-block;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-size: 11px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .badge-success {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+
+        .badge-failure {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+
+        .badge-neutral {
+            background: #e9ecef;
+            color: #495057;
+            border: 1px solid #dee2e6;
+        }
+
+        .badge-id {
+            font-family: 'Roboto Mono', monospace;
+            background: #f1f3f5;
+            color: #6c757d;
+            font-weight: normal;
+            font-size: 10px;
+        }
+
+        /* Secondary text for UUIDs and timestamps */
+        .text-secondary {
+            color: #adb5bd;
+            font-size: 11px;
+            font-family: 'Roboto Mono', monospace;
+        }
+
+        /* Modal Styles */
+        .modal-overlay {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.5);
+            z-index: 1000;
+            justify-content: center;
+            align-items: center;
+        }
+
+        .modal-content {
+            background: white;
+            width: 80%;
+            max-width: 900px;
+            max-height: 85vh;
+            border-radius: 8px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            font-family: 'Roboto', sans-serif;
+        }
+
+        .modal-header {
+            padding: 16px 20px;
+            border-bottom: 1px solid #dee2e6;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            background: #f8f9fa;
+        }
+
+        .modal-title {
+            font-weight: bold;
+            font-size: 18px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .modal-close {
+            background: none;
+            border: none;
+            font-size: 24px;
+            cursor: pointer;
+            color: #666;
+        }
+
+        .modal-body {
+            padding: 20px;
+            overflow-y: auto;
+            flex: 1;
+            background: #fff;
+        }
+
+        .cell-actions {
+            display: flex;
+            gap: 4px;
+            margin-left: 8px;
+            opacity: 0.6;
+            transition: opacity 0.2s;
+        }
+
+        .cell-wrapper:hover .cell-actions {
+            opacity: 1;
+        }
+
+        .action-btn {
+            background: #e9ecef;
+            border: 1px solid #ced4da;
+            border-radius: 4px;
+            padding: 2px 6px;
+            cursor: pointer;
+            font-size: 14px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #495057;
+        }
+
+        .action-btn:hover {
+            background: #dee2e6;
+            color: #212529;
+        }
+
+        .cell-wrapper {
+            display: flex;
+            align-items: flex-start;
+            justify-content: space-between;
+        }
+
+        /* Truncate ID columns */
+        .cell-id .cell-raw {
+            max-width: 120px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        /* Updated CSS for Cell Content */
+        .cell-content,
+        .cell-raw,
+        .cell-pretty {
+            font-family: 'Roboto Mono', monospace;
+            font-size: 13px;
+            line-height: 1.4;
+            color: #333;
+            max-width: 100%;
+            word-break: break-word;
+        }
+
+        .cell-raw {
+            display: -webkit-box;
+            -webkit-line-clamp: 3;
+            line-clamp: 3;
+            -webkit-box-orient: vertical;
+            overflow: hidden;
+            white-space: pre-wrap;
+        }
+
+        .cell-pretty {
+            display: none;
+            white-space: pre-wrap;
+            /* formatted json */
+        }
+
+        /* When row is expanded, swap raw and pretty */
+        tr.expanded .cell-raw {
+            display: none;
+        }
+
+        tr.expanded .cell-pretty {
+            display: block;
+            -webkit-line-clamp: unset;
+            line-clamp: unset;
+            max-height: none;
+            overflow: visible;
+        }
+
+        tr {
+            cursor: pointer;
+            /* Indicate row is clickable */
+            transition: background-color 0.2s ease;
+        }
+
+        tr:hover {
+            background-color: #e2e6ea !important;
+            /* Slightly darker on hover */
+        }
+
+        /* Zebra Striping */
+        tbody tr:nth-child(odd) {
+            background-color: #ffffff;
+        }
+
+        tbody tr:nth-child(even) {
+            background-color: #f8f9fa;
+            /* Light grey for even rows */
+        }
+
+        /* Updated CSS for Multi-line Clamping and Expansion */
+
+
+        /* Conversation & Modal Styles */
+        .json-pre-modal {
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 6px;
+            font-family: 'Roboto Mono', monospace;
+            font-size: 13px;
+            overflow-x: auto;
+            margin: 0;
+            white-space: pre-wrap;
+            word-break: break-all;
+        }
+
+        .conversation-container {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        /* (Redundant definitions removed - consolidated above) */
+
+        /* XML/Tag Highlighting */
+        .xml-tag {
+            color: #0000ff;
+            font-weight: bold;
+        }
+
+        .python-tag {
+            color: #800080;
+            font-weight: bold;
+        }
+
+        .repl-tag {
+            color: #d63384;
+            font-weight: bold;
+        }
+
+        .think-tag {
+            color: #0ddd22;
+            font-style: italic;
+        }
+
+        /* JSON Syntax Highlighting */
+        .string {
+            color: #028a0f;
+        }
+
+        /* Green for strings */
+        .number {
+            color: #d71414;
+        }
+
+        /* Red for numbers */
+        .boolean {
+            color: #0000ff;
+        }
+
+        /* Blue for booleans */
+        .null {
+            color: #888;
+        }
+
+        /* Grey for null */
+        .key {
+            color: #a52a2a;
+        }
+
+        /* Brown for keys */
+        .json-key {
+            color: #a52a2a;
+            font-weight: bold;
+        }
+
+        /* Contracted columns (ID, Date, Metadata keys) */
+        .cell-contract {
+            width: 120px;
+            max-width: 120px;
+            min-width: 120px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        /* Contracted columns (ID, Date, Metadata keys) */
+        .cell-contract {
+            width: 120px;
+            max-width: 120px;
+            min-width: 120px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        /* Conversation Columns - Largest */
+        .cell-conversation {
+            min-width: 400px;
+            width: 40%;
+        }
+
+        /* JSON/Text Columns - Medium */
+        .cell-medium {
+            min-width: 250px;
+            width: 20%;
+        }
+
+        /* Reduced Columns - Smaller than Medium but not Contracted */
+        .cell-reduced {
+            min-width: 150px;
+        }
+
+        /* Allow these to shrink if needed, but they are small by default */
+        th.cell-contract {
+            width: 120px;
+            max-width: 120px;
+        }
+    </style>
+</head>
+
+<body>
+    <!-- (Header and Controls remain the same, simplified in replacement) -->
+    <header class="dashboard-header">
+        <h1>Gymkhana Gymboard</h1>
+        <img src="static/marketagents_logo.png" alt="Gymkhana Logo" class="logo">
+    </header>
+    <div class="dashboard">
+        <!-- Controls... -->
+        <div class="controls-container">
+            <button id="refreshButton" class="refresh-button"> ↺ </button>
+            <button id="exportMarkdownButton">Export Markdown</button>
+            <button id="prevPage" class="prev-page"> ← </button>
+            <span id="pageInfo"></span>
+            <button id="nextPage" class="next-page"> → </button>
+            <input type="number" id="pageSizeInput" min="1" max="1000" value="100">
+            <input type="text" id="searchInput" placeholder="SEARCH">
+            <label for="tableSelect"></label>
+            <select id="tableSelect"></select>
+            <select id="viewSelect">
+                <option value="table">Table</option>
+                <option value="chart">Chart</option>
+            </select>
+            <label for="xColumnSelect">X</label>
+            <select id="xColumnSelect"></select>
+            <label for="yColumnSelect">Y</label>
+            <select id="yColumnSelect"></select>
+        </div>
+
+        <div class="chart-container" style="display: none;">
+            <div id="dataChart"></div>
+            <pre id="markdownOutput" class="markdown-output"></pre>
+        </div>
+        <div class="table-container">
+            <table id="dataTable">
+                <thead id="tableHead"></thead>
+                <tbody id="tableBody"></tbody>
+            </table>
+        </div>
+    </div>
+    </div>
+
+    <!-- Modal Container (Same as before) -->
+    <div id="detailModal" class="modal-overlay">
+        <div class="modal-content">
+            <div class="modal-header">
+                <div class="modal-title" id="modalTitle">Details</div>
+                <button class="modal-close" onclick="closeModal()">×</button>
+            </div>
+            <div class="modal-body" id="modalBody">
+                <!-- Content goes here -->
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let currentPage = 1;
+        let totalPages = 1;
+        let pageSize = 100;
+
+        // ... (fetch functions same as before) ...
+
+        // Global presentation configuration
+        const HEADER_MAP = {
+            'task_id': 'Task ID',
+            'success': 'Success',
+            'total_reward': 'Reward',
+            'turn_index': 'Idx',
+            'execution_time_ms': 'Duration',
+            'num_code_blocks': 'Blocks',
+            'num_errors': 'Errors',
+            'final_answer': 'Final Answer',
+            'created_at': 'Created',
+            'state_formatted': 'State Summary',
+            'output': 'Output/Result'
+        };
+
+        const COLUMN_PRIORITY = [
+            'id', 'success', 'status', 'task_id', 'task', 'messages', 'conversations', 'content',
+            'output', 'final_answer', 'response', 'state_formatted',
+            'code', 'error', 'role', 'turn_index', 'raw_request', 'raw_response'
+        ];
+
+        // Helper to format technical data for the table view
+        function formatValueForTable(value, key) {
+            if (value === null || value === undefined) return '<span class="text-secondary">NULL</span>';
+
+            const lowerKey = key.toLowerCase();
+            const strVal = String(value);
+            const lowerVal = strVal.toLowerCase();
+
+            // 1. Success/Boolean Badging
+            if (typeof value === 'boolean' || lowerKey === 'success' || lowerKey === 'done') {
+                const isSuccess = strVal.toLowerCase() === 'true';
+                return `<span class="badge ${isSuccess ? 'badge-success' : 'badge-failure'}">${isSuccess ? 'PASS' : 'FAIL'}</span>`;
+            }
+
+            // 2. Enum/Status Coloring
+            const statusMap = {
+                'true': 'badge-success',
+                'false': 'badge-failure',
+                'passed': 'badge-success',
+                'failed': 'badge-failure',
+                'pass': 'badge-success',
+                'fail': 'badge-failure',
+                'running': 'badge-neutral',
+                'completed': 'badge-success'
+            };
+            if (statusMap[lowerVal]) {
+                return `<span class="badge ${statusMap[lowerVal]}">${strVal}</span>`;
+            }
+
+            // 3. UUID Truncation
+            if (typeof value === 'string' && /^[0-9a-f-]{36}$/i.test(value)) {
+                return `<span class="badge badge-id" title="${value}">${value.substring(0, 8)}...</span>`;
+            }
+
+            // 4. Date Formatting
+            if (lowerKey.includes('created') || lowerKey.includes('_at') || lowerKey.includes('time') || lowerKey.includes('date')) {
+                try {
+                    const date = new Date(value);
+                    if (!isNaN(date.getTime()) && strVal.length > 5) {
+                        return `<span class="text-secondary" title="${strVal}">${date.toLocaleString([], {
+                            year: 'numeric',
+                            month: 'short',
+                            day: 'numeric',
+                            hour: '2-digit',
+                            minute: '2-digit',
+                            second: '2-digit'
+                        })}</span>`;
+                    }
+                } catch (e) { }
+            }
+
+            // 5. Numbers/Rewards
+            if (typeof value === 'number') {
+                if (lowerKey.includes('reward')) return value.toFixed(4);
+                if (lowerKey === 'execution_time_ms') return (value / 1000).toFixed(2) + 's';
+                return value;
+            }
+
+            return escapeHtml(strVal);
+        }
+
+        // Helper to escape HTML to prevent browser from parsing custom tags as elements
+        function escapeHtml(unsafe) {
+            if (!unsafe) return "";
+            return String(unsafe)
+                .replace(/&/g, "&amp;")
+                .replace(/</g, "&lt;")
+                .replace(/>/g, "&gt;")
+                .replace(/"/g, "&quot;")
+                .replace(/'/g, "&#039;");
+        }
+
+        // Helper to highlight specific XML-like tags after escaping
+        function highlightXmlTags(escapedText) {
+            // Replaces escaped tags like &lt;python&gt; with <span class="python-tag">&lt;python&gt;</span>
+            // We use a regex that matches the escaped versions
+
+            // Map of tagname -> css class
+            const tagMap = {
+                'python': 'python-tag',
+                'repl': 'repl-tag',
+                'think': 'think-tag',
+                'final_answer': 'xml-tag'
+            };
+
+            let text = escapedText;
+
+            // Generic XML tag highlighter for known tags
+            for (const [tag, className] of Object.entries(tagMap)) {
+                // Open tag: &lt;tag&gt;
+                const openRegex = new RegExp(`&lt;${tag}&gt;`, 'g');
+                text = text.replace(openRegex, `<span class="${className}">&lt;${tag}&gt;</span>`);
+
+                // Close tag: &lt;/tag&gt;
+                const closeRegex = new RegExp(`&lt;/${tag}&gt;`, 'g');
+                text = text.replace(closeRegex, `<span class="${className}">&lt;/${tag}&gt;</span>`);
+            }
+
+            // Optional: generic highlighter for other tags if needed, but risky if huge text
+            // text = text.replace(/&lt;(\/?[a-zA-Z0-9_]+)&gt;/g, '<span class="xml-tag">&lt;$1&gt;</span>');
+
+            return text;
+        }
+
+        // REPLACEMENT START: populateTable and renderCellWithActions
+
+        function renderCellWithActions(data, fullJson, type, key) {
+            // type: 'conversation', 'json', 'text'
+
+            // 1. Raw Data (Squashed) for Collapsed View
+            let displayRaw;
+            if (type === 'conversation' || type === 'json') {
+                displayRaw = escapeHtml(JSON.stringify(data));
+            } else {
+                // Use formatValueForTable for the short view to keep badges/colors
+                displayRaw = formatValueForTable(data, key);
+            }
+
+            // 2. Pretty Data (Indented) for Expanded View
+            const prettyData = (typeof data === 'string') ? data : JSON.stringify(data, null, 2);
+
+            let buttons = '';
+            // Buttons just open Modals
+            if (type === 'conversation') {
+                buttons = `
+                    <button class="action-btn" title="Conversational View" onclick="event.stopPropagation(); openConversationModal(this)">
+                        <span>💬</span>
+                    </button>
+                    <button class="action-btn" title="Raw JSON" onclick="event.stopPropagation(); openJsonModal(this)">
+                        <span>{}</span>
+                    </button>
+                `;
+            } else if (type === 'json') {
+                buttons = `
+                    <button class="action-btn" title="JSON View" onclick="event.stopPropagation(); openJsonModal(this)">
+                        <span>{}</span>
+                    </button>
+                `;
+            } else {
+                // Text
+                buttons = '';
+            }
+
+            // We must FULLY escape the JSON before putting it in the DOM, otherwise <tags> get parsed as HTML and stripped.
+            const safeContent = escapeHtml(fullJson);
+
+            // Escape HTML for indented view (pretty), allow highlighting
+            const displayPrettyHTML = highlightXmlTags(escapeHtml(prettyData));
+
+            return `
+                <div class="cell-wrapper">
+                    <!-- Dual Views managed by CSS -->
+                    <div class="cell-raw">${displayRaw}</div>
+                    <div class="cell-pretty">${displayPrettyHTML}</div>
+
+                    <div class="cell-actions">
+                        ${buttons}
+                    </div>
+                    <div class="full-data" style="display:none;">${safeContent}</div>
+                </div>
+            `;
+        }
+
+        // populateTable now adds row click handler
+        function populateTable(data, xColumn, yColumn) {
+            if (data.length === 0) {
+                document.getElementById('dataTable').style.display = 'none';
+                return;
+            } else {
+                document.getElementById('dataTable').style.display = 'table';
+            }
+
+            const tableHead = document.getElementById('tableHead');
+            const tableBody = document.getElementById('tableBody');
+
+            tableHead.innerHTML = '';
+            tableBody.innerHTML = '';
+
+            const keys = Object.keys(data[0]);
+            let validColumns = keys.filter(key => {
+                return data.some(row => row[key] !== null);
+            });
+
+            // No column limit — show all non-null columns
+
+            // First, Determine Column Types based on the first non-null row for each key
+            const columnTypes = {}; // map key -> 'conversation' | 'json' | 'text' | 'contract' | 'default
+
+            validColumns.forEach(key => {
+                const lowerKey = key.toLowerCase();
+                if (lowerKey.includes('id') || lowerKey.includes('uuid') || lowerKey.includes('date') || lowerKey.includes('time') || lowerKey.includes('created') || lowerKey.includes('meta')) {
+                    columnTypes[key] = 'contract';
+                    return;
+                }
+
+                // Explicitly check for known text columns that shouldn't be squeezed
+                if (lowerKey === 'system' || lowerKey === 'model' || lowerKey === 'role') {
+                    columnTypes[key] = 'text'; // medium width
+                    return;
+                }
+
+                // Check content
+                const sampleRow = data.find(r => r[key] !== null) || {};
+                const value = sampleRow[key];
+
+                if (value && typeof value === 'string' && isJSON(value)) {
+                    const parsed = JSON.parse(value);
+                    if (isConversation(parsed)) {
+                        columnTypes[key] = 'conversation';
+                    } else {
+                        columnTypes[key] = 'json';
+                    }
+                } else if (value && typeof value === 'string' && value.length > 50) {
+                    // Long text
+                    columnTypes[key] = 'text';
+                } else {
+                    columnTypes[key] = 'default';
+                }
+            });
+
+            const headerRow = document.createElement('tr');
+            validColumns.forEach((key, index) => {
+                const th = document.createElement('th');
+                if (key === 'x_value' && xColumn) {
+                    th.textContent = xColumn;
+                } else if (key === 'y_value' && yColumn) {
+                    th.textContent = yColumn;
+                } else {
+                    th.textContent = key;
+                }
+                th.onclick = () => sortTable(index);
+
+                // Header classes
+                const type = columnTypes[key];
+                if (type === 'contract') th.classList.add('cell-contract');
+                else if (type === 'conversation') th.classList.add('cell-conversation');
+                else if (type === 'json' || type === 'text') th.classList.add('cell-medium');
+
+                headerRow.appendChild(th);
+            });
+            tableHead.appendChild(headerRow);
+
+            data.forEach(row => {
+                const tr = document.createElement('tr');
+
+                // Add Row Click Handler
+                tr.onclick = function (e) {
+                    // Toggle expansion if click is NOT on a button (handled by stopPropagation, but good to double check)
+                    // The event.stopPropagation() on buttons should handle it, but this adds safety.
+                    if (!e.target.closest('button')) {
+                        this.classList.toggle('expanded');
+                    }
+                };
+
+                validColumns.forEach(key => {
+                    const td = document.createElement('td');
+                    const value = row[key];
+                    const type = columnTypes[key];
+
+                    // Apply layout class
+                    if (type === 'contract') td.classList.add('cell-contract');
+                    else if (type === 'conversation') td.classList.add('cell-conversation');
+                    else if (type === 'json' || type === 'text') td.classList.add('cell-medium');
+
+                    if (value === null) {
+                        td.innerHTML = formatValueForTable(null, key);
+                    } else if (typeof value === 'string' && isJSON(value)) {
+                        const parsed = JSON.parse(value);
+                        const isConv = isConversation(parsed);
+                        const renderType = isConv ? 'conversation' : 'json';
+                        td.innerHTML = renderCellWithActions(parsed, value, renderType, key);
+                    } else {
+                        td.innerHTML = renderCellWithActions(value, String(value), 'text', key);
+                    }
+                    tr.appendChild(td);
+                });
+                tableBody.appendChild(tr);
+            });
+        }
+
+
+        // Connecting the two script parts
+
+
+        async function fetchTables() {
+            try {
+                const response = await fetch('/api/get-tables');
+                if (!response.ok) {
+                    throw new Error(`Error fetching tables: ${response.statusText}`);
+                }
+                const tables = await response.json();
+                await populateTableSelect(tables);
+                const initialTable = document.getElementById('tableSelect').value;
+                if (initialTable) {
+                    const columns = await fetchColumnNames(initialTable);
+                    populateColumnSelects(columns);
+                }
+            } catch (error) {
+                console.error('Error fetching table list:', error);
+                alert('Failed to fetch table list. Please check the console for more details.');
+            }
+        }
+
+        async function populateTableSelect(tables) {
+            const tableSelect = document.getElementById('tableSelect');
+            tableSelect.innerHTML = '';
+            tables.forEach(table => {
+                const option = document.createElement('option');
+                option.value = table;
+                option.textContent = table;
+                tableSelect.appendChild(option);
+            });
+        }
+
+        async function fetchColumnNames(tableName) {
+            try {
+                const response = await fetch(`/api/column-names?table_name=${encodeURIComponent(tableName)}`);
+                if (!response.ok) {
+                    throw new Error(`Error fetching column names: ${response.statusText}`);
+                }
+                return await response.json();
+            } catch (error) {
+                console.error('Error fetching column names:', error);
+                alert('Failed to fetch column names. Please check the console for more details.');
+                return [];
+            }
+        }
+
+        function populateColumnSelects(columns) {
+            const xSelect = document.getElementById('xColumnSelect');
+            const ySelect = document.getElementById('yColumnSelect');
+            xSelect.innerHTML = '';
+            ySelect.innerHTML = '';
+
+            columns.forEach(column => {
+                const xOption = document.createElement('option');
+                const yOption = document.createElement('option');
+
+                xOption.value = column.name;
+                yOption.value = column.name;
+                xOption.textContent = `${column.name} (${column.type})`;
+                yOption.textContent = `${column.name} (${column.type})`;
+
+                xSelect.appendChild(xOption);
+                ySelect.appendChild(yOption);
+            });
+        }
+
+        async function fetchData(tableName, xColumn, yColumn, fullTable, page = 1) {
+            try {
+                let url = `/api/metrics-data?table_name=${encodeURIComponent(tableName)}&page=${page}&page_size=${pageSize}`;
+                if (fullTable) {
+                    url += '&full_table=true';
+                } else {
+                    url += `&x_column=${encodeURIComponent(xColumn)}&y_column=${encodeURIComponent(yColumn)}`;
+                }
+                const response = await fetch(url);
+                if (!response.ok) {
+                    throw new Error(`Error fetching data: ${response.statusText}`);
+                }
+                return await response.json();
+            } catch (error) {
+                console.error('Error fetching data:', error);
+                alert('Failed to fetch data. Please check the console for more details.');
+                return { data: [], total_count: 0, page: 1, total_pages: 1 };
+            }
+        }
+
+        async function performSearch(tableName, searchTerm, page = 1) {
+            try {
+                const response = await fetch(`/api/search?table_name=${encodeURIComponent(tableName)}&search_term=${encodeURIComponent(searchTerm)}&page=${page}&page_size=${pageSize}`);
+                if (!response.ok) {
+                    throw new Error(`Error searching: ${response.statusText}`);
+                }
+                return await response.json();
+            } catch (error) {
+                console.error('Error performing search:', error);
+                alert('Failed to perform search. Please check the console for more details.');
+                return { data: [], total_count: 0, page: 1, total_pages: 1 };
+            }
+        }
+
+
+
+        // Modal Functions
+        function openJsonModal(btn) {
+            const container = btn.closest('.cell-wrapper');
+            const dataStr = container.querySelector('.full-data').textContent;
+            try {
+                const data = JSON.parse(dataStr);
+                const formatted = JSON.stringify(data, null, 2);
+
+                document.getElementById('modalTitle').innerHTML = '<span>{}</span> JSON View';
+
+                // syntaxHighlight now returns HTML. We can't run highlightXmlTags AFTER it because highlightXmlTags expects escaped text.
+                // But syntaxHighlight escapes keys/values internally now.
+                // Wait, syntaxHighlight returns spans. highlightXmlTags also returns spans.
+                // We should run highlightXmlTags on the Safe HTML returned by syntaxHighlight?
+                // OR we integrate logic.
+                // Let's modify syntaxHighlight to return escaped HTML with spans, and then we run highlightXmlTags on that HTML string?
+                // highlightXmlTags looks for &lt;python&gt;.
+                // syntaxHighlight will turn "<python>" into <span class="string">"&lt;python&gt;"</span>
+                // So highlightXmlTags can run on the output of syntaxHighlight!
+
+                document.getElementById('modalBody').innerHTML = `<pre class="json-pre-modal">${highlightXmlTags(syntaxHighlight(formatted))}</pre>`;
+                document.getElementById('detailModal').style.display = 'flex';
+            } catch (e) {
+                console.error("Error opening JSON modal", e);
+                openTextModal(btn);
+            }
+        }
+
+        function openConversationModal(btn) {
+            const container = btn.closest('.cell-wrapper');
+            const dataStr = container.querySelector('.full-data').textContent;
+            try {
+                const data = JSON.parse(dataStr);
+
+                let bubbles = '';
+                data.forEach(msg => {
+                    const role = (msg.role || msg.from || 'unknown').toLowerCase();
+                    const content = msg.content || msg.value || JSON.stringify(msg);
+
+                    // 1. Ensure string and TRIM to remove excessive ShareGPT newlines
+                    let safeContent = String(content).trim();
+
+                    // 2. Escape HTML characters (so <python> becomes &lt;python&gt;)
+                    safeContent = escapeHtml(safeContent);
+
+                    // 3. Highlight XML tags (turns &lt;python&gt; into <span...>...</span>)
+                    safeContent = highlightXmlTags(safeContent);
+
+                    // 4. Convert newlines to <br> handled by CSS white-space: pre-wrap
+
+                    bubbles += `<div class="bubble role-${role}"><span class="role-label">${role}</span><div class="bubble-content">${safeContent}</div></div>`;
+                });
+
+                document.getElementById('modalTitle').innerHTML = '<span>💬</span> Conversational View';
+                document.getElementById('modalBody').innerHTML = `<div class="conversation-container" style="max-height: 100%; border:none; box-shadow:none;">${bubbles}</div>`;
+                document.getElementById('detailModal').style.display = 'flex';
+            } catch (e) {
+                console.error("Error opening Conversation modal", e);
+                openJsonModal(btn);
+            }
+        }
+
+        function openTextModal(btn) {
+            const container = btn.closest('.cell-wrapper');
+            const dataStr = container.querySelector('.full-data').textContent;
+
+            document.getElementById('modalTitle').innerHTML = '<span>📄</span> Text View';
+            document.getElementById('modalBody').innerHTML = `<pre class="json-pre-modal" style="white-space: pre-wrap;">${highlightXmlTags(escapeHtml(dataStr))}</pre>`;
+            document.getElementById('detailModal').style.display = 'flex';
+        }
+
+        function closeModal() {
+            document.getElementById('detailModal').style.display = 'none';
+        }
+
+        window.onclick = function (event) {
+            const modal = document.getElementById('detailModal');
+            if (event.target === modal) {
+                closeModal();
+            }
+        }
+
+        function syntaxHighlight(json) {
+            // First we need to properly escape the JSON string so XML tags inside strings are preserved
+            // The trick is: we want to keep the JSON structure parsable by the regex, but display the content escaped.
+            // But checking regex against escaped string is hard because invalid JSON chars like &quot;
+
+            // Simpler approach:
+            // 1. Replace special XML chars in the whole string first? No, because that breaks quotes.
+            // 2. Work on the original string, find tokens, and THEN escape them before wrapping in span.
+
+            return json.replace(/("(\\u[a-zA-Z0-9]{4}|\\[^u]|[^\\"])*"(\s*:)?|\b(true|false|null)\b|-?\d+(?:\.\d*)?(?:[eE][+\-]?\d+)?)/g, function (match) {
+                var cls = 'number';
+
+                // If it starts with ", it's a string or key
+                if (/^"/.test(match)) {
+                    if (/:$/.test(match)) {
+                        cls = 'key';
+                        // Remove colon, escape keys just in case
+                        const key = match.substring(0, match.length - 1);
+                        return '<span class="json-key">' + escapeHtml(key) + '</span>:';
+                    } else {
+                        cls = 'string';
+                        // Matches a string value. Escape content!
+                        return '<span class="' + cls + '">' + escapeHtml(match) + '</span>';
+                    }
+                } else if (/true|false/.test(match)) {
+                    cls = 'boolean';
+                } else if (/null/.test(match)) {
+                    cls = 'null';
+                }
+                return '<span class="' + cls + '">' + match + '</span>';
+            });
+        }
+
+        function isConversation(data) {
+            if (!Array.isArray(data)) return false;
+            if (data.length === 0) return false;
+            // Check first item for common conversation keys
+            const keys = Object.keys(data[0]);
+            return keys.includes('role') || keys.includes('from');
+        }
+
+
+        window.toggleConversation = function (element) {
+            const container = element.parentNode;
+            let fullDataStr = container.querySelector('.full-data').textContent;
+            // Handle double-escaping if necessary
+            try {
+                const fullData = JSON.parse(fullDataStr);
+                container.innerHTML = renderExpandedView(fullData, fullDataStr);
+            } catch (e) {
+                console.error("Error toggling conversation view", e);
+            }
+        };
+
+        window.collapseConversation = function (btn) {
+            const topDiv = btn.parentNode.parentNode; // div wrapper
+            const container = topDiv.parentNode; // td
+            const fullDataStr = topDiv.querySelector('.full-data').textContent;
+            try {
+                const fullData = JSON.parse(fullDataStr);
+                container.innerHTML = renderCollapsedView(fullData, fullDataStr);
+            } catch (e) {
+                console.error("Error collapsing conversation view", e);
+            }
+        };
+
+        function isJSON(str) {
+            try {
+                const parsed = JSON.parse(str);
+                return typeof parsed === 'object' && parsed !== null;
+            } catch (e) {
+                return false;
+            }
+        }
+
+        function formatJSON(json) {
+            return JSON.stringify(JSON.parse(json), null, 2)
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"(\w+)":/g, '<span class="json-key">"$1"</span>:');
+        }
+
+
+
+        // Replace your sortTable function with this corrected version
+        function sortTable(n) {
+            const table = document.getElementById('dataTable');
+            let rows, switching, i, x, y, shouldSwitch, dir, switchcount = 0;
+            switching = true;
+            dir = 'asc';
+
+            function getValue(cell) {
+                const value = cell.textContent.trim();
+                if (/^-?\d+$/.test(value)) {
+                    return parseInt(value, 10);
+                } else if (/^-?\d*\.?\d+$/.test(value)) {
+                    return parseFloat(value);
+                } else {
+                    return value.toLowerCase();
+                }
+            }
+
+            while (switching) {
+                switching = false;
+                rows = table.rows;
+                for (i = 1; i < (rows.length - 1); i++) {
+                    shouldSwitch = false;
+                    x = getValue(rows[i].getElementsByTagName('TD')[n]);
+                    y = getValue(rows[i + 1].getElementsByTagName('TD')[n]);
+                    if (dir === 'asc') {
+                        if (x > y) {
+                            shouldSwitch = true;
+                            break;
+                        }
+                    } else if (dir === 'desc') {
+                        if (x < y) {
+                            shouldSwitch = true;
+                            break;
+                        }
+                    }
+                }
+                if (shouldSwitch) {
+                    rows[i].parentNode.insertBefore(rows[i + 1], rows[i]);
+                    switching = true;
+                    switchcount++;
+                } else {
+                    if (switchcount === 0 && dir === 'asc') {
+                        dir = 'desc';
+                        switching = true;
+                    }
+                }
+            }
+
+            // After sorting, update the chart if we're in chart view
+            const viewSelect = document.getElementById('viewSelect');
+            if (viewSelect.value === 'chart') {
+                const tbody = table.getElementsByTagName('tbody')[0];
+                const rows = Array.from(tbody.getElementsByTagName('tr'));
+
+                // Get the x and y values from the sorted table
+                const xValues = [];
+                const yValues = [];
+
+                rows.forEach(row => {
+                    const cells = row.getElementsByTagName('td');
+                    // In chart view, we're looking for x_value and y_value columns
+                    const xValueCell = cells[0]; // First column is x_value
+                    const yValueCell = cells[1]; // Second column is y_value
+
+                    if (xValueCell && yValueCell) {
+                        const xValue = xValueCell.textContent.trim();
+                        const yValue = yValueCell.textContent.trim();
+
+                        xValues.push(xValue);
+                        // Try to convert y to number if possible
+                        yValues.push(!isNaN(parseFloat(yValue)) ? parseFloat(yValue) : yValue);
+                    }
+                });
+
+                // Update the Plotly chart with the new sorted data
+                if (xValues.length > 0 && yValues.length > 0) {
+                    Plotly.restyle('dataChart', {
+                        x: [xValues],
+                        y: [yValues]
+                    });
+                }
+            }
+        }
+
+        // Add these helper functions for data type detection
+        function detectDataType(values) {
+            const sampleSize = Math.min(values.length, 10); // Check first 10 values
+            let dateCount = 0;
+            let numberCount = 0;
+            let categoricalCount = 0;
+
+            for (let i = 0; i < sampleSize; i++) {
+                const value = values[i];
+                if (!value && value !== 0) continue;
+
+                // Check if it's a date
+                const date = new Date(value);
+                if (!isNaN(date.getTime()) && value.length > 4) { // Length > 4 to avoid treating years as dates
+                    dateCount++;
+                    continue;
+                }
+
+                // Check if it's a number
+                if (!isNaN(parseFloat(value)) && isFinite(value)) {
+                    numberCount++;
+                    continue;
+                }
+
+                // If not date or number, consider it categorical
+                categoricalCount++;
+            }
+
+            // Determine predominant type
+            const max = Math.max(dateCount, numberCount, categoricalCount);
+            if (max === dateCount) return 'date';
+            if (max === numberCount) return 'number';
+            return 'categorical';
+        }
+
+        function analyzeDistribution(values) {
+            const uniqueValues = new Set(values).size;
+            const dataLength = values.length;
+
+            // If more than 50% of values are unique, consider it continuous
+            return uniqueValues / dataLength > 0.5 ? 'continuous' : 'discrete';
+        }
+
+        // Replace your initChart function with this smarter version
+        function initChart(data, xColumn, yColumn) {
+            const chartContainer = document.querySelector('.chart-container');
+
+            if (data.length === 0) {
+                chartContainer.style.display = 'none';
+                document.getElementById('dataChart').style.display = 'none';
+                return;
+            }
+
+            chartContainer.style.display = 'block';
+            document.getElementById('dataChart').style.display = 'block';
+
+            const xData = data.map(row => row.x_value);
+            const yData = data.map(row => row.y_value);
+
+            // Detect data types
+            const xType = detectDataType(xData);
+            const yType = detectDataType(yData);
+            const xDistribution = analyzeDistribution(xData);
+            const yDistribution = analyzeDistribution(yData);
+
+            // Configure chart based on data types
+            let chartType = 'scatter';
+            let mode = 'lines+markers';
+            let markerSize = 6;
+
+            // Determine the best chart type based on data characteristics
+            if (xType === 'categorical' || yType === 'categorical') {
+                if (xDistribution === 'discrete' && yType === 'number') {
+                    chartType = 'bar';
+                    mode = 'none';
+                }
+            } else if (xType === 'date' && yType === 'number') {
+                mode = 'lines+markers';
+                markerSize = 4; // Smaller markers for time series
+            } else if (xType === 'number' && yType === 'number') {
+                if (xDistribution === 'discrete' && yDistribution === 'discrete') {
+                    mode = 'markers';
+                    markerSize = 8; // Larger markers for discrete data
+                }
+            }
+
+            const trace = {
+                x: xData,
+                y: yData,
+                type: chartType,
+                mode: mode,
+                name: yColumn,
+                line: {
+                    color: '#463e8d',
+                    width: 2
+                },
+                marker: {
+                    color: '#564caf',
+                    size: markerSize
+                }
+            };
+
+            const layout = {
+                xaxis: {
+                    gridcolor: '#e1e1e1',
+                    zeroline: false,
+                    automargin: true
+                },
+                yaxis: {
+                    gridcolor: '#e1e1e1',
+                    zeroline: false,
+                    automargin: true
+                },
+                plot_bgcolor: '#ffffff',
+                paper_bgcolor: '#ffffff',
+                margin: {
+                    l: 60,
+                    r: 30,
+                    t: 30,
+                    b: 50
+                },
+                showlegend: false,
+                hovermode: 'closest'
+            };
+
+            // Add histogram if appropriate
+            if (chartType === 'scatter' && yType === 'number') {
+                layout.yaxis.showspikes = true;
+                layout.xaxis.showspikes = true;
+            }
+
+            const config = {
+                responsive: true,
+                displayModeBar: true,
+                displaylogo: false,
+                modeBarButtonsToRemove: ['lasso2d', 'select2d'],
+                toImageButtonOptions: {
+                    format: 'png',
+                    filename: 'chart_export',
+                    height: 500,
+                    width: 700,
+                    scale: 2
+                }
+            };
+
+            Plotly.newPlot('dataChart', [trace], layout, config);
+        }
+
+        function updatePaginationInfo(currentPage, totalPages) {
+            document.getElementById('pageInfo').textContent = ` ${currentPage} / ${totalPages} `;
+            document.getElementById('prevPage').disabled = currentPage <= 1;
+            document.getElementById('nextPage').disabled = currentPage >= totalPages;
+        }
+
+        function updateInputStates() {
+            const viewSelect = document.getElementById('viewSelect');
+            const xColumnSelect = document.getElementById('xColumnSelect');
+            const yColumnSelect = document.getElementById('yColumnSelect');
+            const searchInput = document.getElementById('searchInput');
+
+            const isChartView = viewSelect.value === 'chart';
+            const hasSearchTerm = searchInput.value.trim() !== '';
+
+            xColumnSelect.disabled = !isChartView || hasSearchTerm;
+            yColumnSelect.disabled = !isChartView || hasSearchTerm;
+        }
+
+        async function refreshDashboard(page = 1) {
+            const tableSelect = document.getElementById('tableSelect');
+            const xColumnSelect = document.getElementById('xColumnSelect');
+            const yColumnSelect = document.getElementById('yColumnSelect');
+            const viewSelect = document.getElementById('viewSelect');
+            const searchInput = document.getElementById('searchInput');
+            const tableName = tableSelect.value;
+            const xColumn = xColumnSelect.value;
+            const yColumn = yColumnSelect.value;
+            const isChartView = viewSelect.value === 'chart';
+            const searchTerm = searchInput.value.trim();
+
+            if (!tableName) {
+                alert('Please select a table.');
+                return;
+            }
+
+            if (isChartView && !searchTerm && (!xColumn || !yColumn)) {
+                alert('Please select columns for both axes or enter a search term.');
+                return;
+            }
+
+            let result;
+            if (searchTerm) {
+                result = await performSearch(tableName, searchTerm, page);
+            } else {
+                result = await fetchData(tableName, xColumn, yColumn, !isChartView, page);
+            }
+
+            currentPage = result.page;
+            totalPages = result.total_pages;
+            updatePaginationInfo(currentPage, totalPages);
+
+            // Sort the data before displaying
+            if (result.data.length > 0) {
+                const firstKey = Object.keys(result.data[0])[0]; // Get the first column name
+                result.data.sort((a, b) => {
+                    const aVal = a[firstKey];
+                    const bVal = b[firstKey];
+
+                    // Handle different data types
+                    if (!isNaN(Date.parse(aVal)) && !isNaN(Date.parse(bVal))) {
+                        // Date comparison
+                        return new Date(aVal) - new Date(bVal);
+                    } else if (!isNaN(aVal) && !isNaN(bVal)) {
+                        // Numeric comparison
+                        return parseFloat(aVal) - parseFloat(bVal);
+                    } else {
+                        // String comparison
+                        return String(aVal).localeCompare(String(bVal));
+                    }
+                });
+            }
+
+            populateTable(result.data, isChartView ? xColumn : null, isChartView ? yColumn : null);
+
+            if (isChartView && !searchTerm) {
+                initChart(result.data, xColumn, yColumn);
+                document.getElementById('markdownOutput').style.display = 'none';
+            } else {
+                const chartContainer = document.querySelector('.chart-container');
+                chartContainer.style.display = 'none';
+                if (document.getElementById('dataChart')) {
+                    Plotly.purge('dataChart');
+                }
+                document.getElementById('dataChart').style.display = 'none';
+                document.getElementById('markdownOutput').style.display = 'none';
+            }
+
+            updateInputStates();
+        }
+
+        // Event listeners
+        document.addEventListener('DOMContentLoaded', async () => {
+            const tableSelect = document.getElementById('tableSelect');
+            const viewSelect = document.getElementById('viewSelect');
+            const xColumnSelect = document.getElementById('xColumnSelect');
+            const yColumnSelect = document.getElementById('yColumnSelect');
+            const searchInput = document.getElementById('searchInput');
+            const refreshButton = document.getElementById('refreshButton');
+            const prevPageButton = document.getElementById('prevPage');
+            const nextPageButton = document.getElementById('nextPage');
+            const pageSizeInput = document.getElementById('pageSizeInput');
+
+            tableSelect.addEventListener('change', async () => {
+                tableSelect.disabled = true;
+                xColumnSelect.disabled = true;
+                yColumnSelect.disabled = true;
+                viewSelect.disabled = true;
+                searchInput.disabled = true;
+
+                try {
+                    const columns = await fetchColumnNames(tableSelect.value);
+                    populateColumnSelects(columns);
+
+                    xColumnSelect.selectedIndex = 0;
+                    yColumnSelect.selectedIndex = 0;
+                    searchInput.value = '';
+
+                    viewSelect.value = 'table';
+
+                    xColumnSelect.disabled = true;
+                    yColumnSelect.disabled = true;
+                    viewSelect.disabled = false;
+                    searchInput.disabled = false;
+
+                    currentPage = 1;
+                    await refreshDashboard(1);
+                } catch (error) {
+                    console.error('Error changing table:', error);
+                    alert(`Failed to change table: ${error.message}`);
+                } finally {
+                    tableSelect.disabled = false;
+                }
+            });
+
+            viewSelect.addEventListener('change', () => {
+                updateInputStates();
+                refreshDashboard(1);
+            });
+
+            searchInput.addEventListener('input', () => {
+                updateInputStates();
+            });
+
+            refreshButton.addEventListener('click', () => refreshDashboard(1));
+
+            prevPageButton.addEventListener('click', () => {
+                if (currentPage > 1) {
+                    refreshDashboard(currentPage - 1);
+                }
+            });
+
+            nextPageButton.addEventListener('click', () => {
+                if (currentPage < totalPages) {
+                    refreshDashboard(currentPage + 1);
+                }
+            });
+
+            pageSizeInput.addEventListener('change', () => {
+                pageSize = parseInt(pageSizeInput.value, 10);
+                if (isNaN(pageSize) || pageSize < 1 || pageSize > 1000) {
+                    pageSize = 100;
+                    pageSizeInput.value = '100';
+                }
+                refreshDashboard(1);
+            });
+
+            await fetchTables();
+            await refreshDashboard(1);
+
+            const exportMarkdownButton = document.getElementById('exportMarkdownButton');
+            exportMarkdownButton.addEventListener('click', () => {
+                const markdown = tableToMarkdown();
+                displayMarkdown(markdown);
+            });
+        });
+
+        function debounce(func, wait) {
+            let timeout;
+            return function executedFunction(...args) {
+                const later = () => {
+                    clearTimeout(timeout);
+                    func(...args);
+                };
+                clearTimeout(timeout);
+                timeout = setTimeout(later, wait);
+            };
+        }
+
+        const debouncedSearch = debounce(() => refreshDashboard(1), 300);
+        document.getElementById('searchInput').addEventListener('input', debouncedSearch);
+
+        document.getElementById('xColumnSelect').addEventListener('change', () => refreshDashboard(1));
+        document.getElementById('yColumnSelect').addEventListener('change', () => refreshDashboard(1));
+        document.getElementById('viewSelect').addEventListener('change', () => refreshDashboard(1));
+
+        function tableToMarkdown() {
+            const table = document.getElementById('dataTable');
+            const headers = Array.from(table.querySelectorAll('th')).map(th => th.textContent);
+            const rows = Array.from(table.querySelectorAll('tbody tr'));
+
+            let markdown = '';
+            let useTable = true;
+
+            rows.forEach(row => {
+                Array.from(row.cells).forEach(cell => {
+                    if (cell.textContent.length > 512) {
+                        useTable = false;
+                    }
+                });
+            });
+
+            if (useTable) {
+                markdown += '| ' + headers.join(' | ') + ' |\n';
+                markdown += '| ' + headers.map(() => '---').join(' | ') + ' |\n';
+
+                rows.forEach(row => {
+                    const cells = Array.from(row.cells).map(cell => cell.textContent);
+                    markdown += '| ' + cells.join(' | ') + ' |\n';
+                });
+            } else {
+                rows.forEach((row, rowIndex) => {
+                    markdown += `Row ${rowIndex + 1}:\n\n`;
+                    Array.from(row.cells).forEach((cell, cellIndex) => {
+                        markdown += `${headers[cellIndex]}: ${cell.textContent}\n\n`;
+                    });
+                    markdown += '---\n\n';
+                });
+            }
+
+            return markdown;
+        }
+
+        function displayMarkdown(markdown) {
+            const chartContainer = document.querySelector('.chart-container');
+            const markdownOutput = document.getElementById('markdownOutput');
+
+            if (markdown.trim() === '') {
+                chartContainer.style.display = 'none';
+                markdownOutput.style.display = 'none';
+                return;
+            }
+
+            chartContainer.style.display = 'block';
+            markdownOutput.style.display = 'block';
+            markdownOutput.textContent = markdown;
+            document.getElementById('dataChart').style.display = 'none';
+        }
+    </script>
+</body>
+
+</html>
