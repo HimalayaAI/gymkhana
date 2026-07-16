@@ -1,0 +1,60 @@
+[project]
+name = "gymkhana"
+version = "0.1.0"
+description = "Multilingual RLVR dataset generation with GRPO-style parallel rollouts"
+readme = "README.md"
+requires-python = ">=3.10,<3.14"
+authors = [
+  { name = "HimalayaAI" }
+]
+
+# Core dependencies - adding as we discover what's needed
+dependencies = [
+  "pydantic>=2.6",
+  "pydantic-settings>=2.0",
+  "pydantic-ai>=2,<3",
+  "python-dotenv>=1.0",
+  "jsonschema>=4.20",
+  "openai>=1.6",
+  "anthropic>=0.18",
+  "requests>=2.31",
+  "aiohttp>=3.9",
+  "datasets>=2.15",
+  "tqdm>=4.66",
+  "tiktoken>=0.5",
+  "backoff>=2.2",
+  "pyyaml>=6.0",
+  "libcst>=1.1",
+  "psycopg2-binary>=2.9",
+  "sqlalchemy>=2.0.35,<2.1",
+  "asyncpg>=0.29",
+  "pgvector>=0.2",
+  "uvicorn>=0.27",
+  "fastapi>=0.109",
+  "flask>=3.0"
+]
+
+[project.optional-dependencies]
+dev = [
+  "packaging>=24",
+  "pytest>=7.4",
+  "pytest-asyncio>=0.23"
+]
+
+[tool.uv]
+package = true
+
+[tool.setuptools.packages.find]
+include = ["gymkhana*"]
+exclude = ["tests*", "scratchpad*"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "strict"
+markers = [
+  "live: opt-in tests that call external services",
+  "anthropic: tests that require Anthropic credentials",
+]
+norecursedirs = ["reference_repos"]
+pythonpath = [
+  "."
+]
