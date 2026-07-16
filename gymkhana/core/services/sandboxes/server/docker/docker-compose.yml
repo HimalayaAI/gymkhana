@@ -1,0 +1,28 @@
+services:
+  gymkhana-repl:
+    build:
+      context: ../../../../../
+      dockerfile: gymkhana/core/services/sandboxes/server/docker/Dockerfile
+    ports:
+      - "5003:5003"
+    volumes:
+      # Persist workspace between restarts (optional)
+      - gymkhana_workspace:/app/workspace
+    environment:
+      - PYTHONUNBUFFERED=1
+      # API keys - set these in your shell or use: docker-compose --env-file ../../../.env up
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - SUB_LLM_MODEL=${SUB_LLM_MODEL:-openai:gpt-4o-mini}
+      # For sub_agent calls from sandbox (localhost inside container)
+      - LLM_QUERY_URL=http://localhost:5003/sub_agent
+    restart: unless-stopped
+    # Resource limits for safety
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+          cpus: '2'
+
+volumes:
+  gymkhana_workspace:
