@@ -9,31 +9,36 @@ Devanagari Nepali <-> romanized Nepali
 The package is deterministic, local, and self-contained. It does not call an
 external service or JavaScript runtime.
 
-## Install
+This is the deterministic reference utility bundled with Gymkhana's
+`romanized-nepali` RLVR environment. LLM candidates are generated separately
+through Gymkhana's Pydantic AI inference service; the translator is not exposed
+to the LLM as a tool.
+
+## Install Gymkhana
 
 ```bash
-python3 -m venv .venv
+python -m venv .venv
 source .venv/bin/activate
-pip install -e ".[test]"
+python -m pip install -e '.[dev]'
 ```
 
 ## CLI
 
 ```bash
-PYTHONPATH=src python -m nepali_romanized_translator.transliterate dev-to-roman \
+python -m gymkhana.envs.romanized_nepali.translator.transliterate dev-to-roman \
   "नेपालमा बैंकहरुले एआई कसरी प्रयोग गर्न सक्छन्?"
 
-PYTHONPATH=src python -m nepali_romanized_translator.transliterate roman-to-dev \
+python -m gymkhana.envs.romanized_nepali.translator.transliterate roman-to-dev \
   "bank le AI prayog garna sakcha"
 
-PYTHONPATH=src python -m nepali_romanized_translator.transliterate round-trip \
+python -m gymkhana.envs.romanized_nepali.translator.transliterate round-trip \
   "ग्राहक सेवा सुधार गर्न सक्छ"
 ```
 
 ## Python API
 
 ```python
-from nepali_romanized_translator import create_translator
+from gymkhana.envs.romanized_nepali.translator import create_translator
 
 translator = create_translator()
 
@@ -58,15 +63,8 @@ over pretending there is a single perfect transliteration for every word.
 ## Test
 
 ```bash
-PYTHONPATH=src:tests python tests/run_local_checks.py
-PYTHONPATH=src:tests python tests/run_smoke_cases.py
-PYTHONPATH=src python -m nepali_romanized_translator.evals
-```
-
-If `pytest` is installed:
-
-```bash
-pytest
+python -m pytest -q tests/envs/test_romanized_translator.py
+python -m gymkhana.envs.romanized_nepali.translator.evals
 ```
 
 ## Attribution
@@ -77,5 +75,5 @@ This package was informed by two Nepali transliteration projects:
 - [`BipinBudhathoki01/Nepaile-Unicode`](https://github.com/BipinBudhathoki01/Nepaile-Unicode)
 
 The default translator is self-contained Python and does not vendor either
-project. See [`ACKNOWLEDGMENTS.md`](ACKNOWLEDGMENTS.md) and
-[`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md).
+project. See [`ACKNOWLEDGMENTS.md`](../ACKNOWLEDGMENTS.md) and
+[`THIRD_PARTY_NOTICES.md`](../THIRD_PARTY_NOTICES.md).

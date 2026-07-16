@@ -57,6 +57,7 @@ class EnvironmentType(str, Enum):
     HOTPOTQA = "hotpotqa"
     SWE = "swe"
     IFEVAL = "ifeval"
+    ROMANIZED_NEPALI = "romanized-nepali"
 
 
 class REPLSettings(BaseModel):
