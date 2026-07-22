@@ -108,6 +108,16 @@ def test_environment_is_registered_with_canonical_aliases() -> None:
     )
 
 
+def test_prompt_explicitly_preserves_ascii_numeric_tokens() -> None:
+    env = EnglishShareGPTToNepaliEnv(records=[{"conversations": SOURCE}])
+    task = env.load_tasks()[0]
+
+    instructions = env.get_environment_instructions(task)
+
+    assert "same ASCII form" in instructions
+    assert "keep `7`, `28`, and `196`" in instructions
+
+
 def test_loads_sharegpt_openai_and_flattened_hermes_rows() -> None:
     records = [
         {

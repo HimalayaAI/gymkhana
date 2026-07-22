@@ -67,6 +67,8 @@ Requirements:
 - Preserve the number and order of messages and every message role exactly.
 - Preserve meaning, facts, names, numbers, units, URLs, email addresses, XML
   tags, Markdown structure, code, formulas, and technical identifiers.
+- Keep every numeric token in the same message and exactly the same ASCII form;
+  for example, keep `7`, `28`, and `196` rather than writing `७`, `२८`, or `१९६`.
 - Keep fenced and inline code unchanged. In structured tool payloads, preserve
   keys, function names, and syntax; translate natural-language string values
   only when doing so is safe.
