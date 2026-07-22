@@ -54,6 +54,11 @@ class QAGenerationSettings(BaseModel):
     source_language: Optional[str] = None
     source_license: Optional[str] = None
     source_kind: Literal["auto", "text", "pdf"] = "auto"
+    document_date_strategy: Literal[
+        "mapped_only",
+        "mapped_or_filename",
+        "mapped_or_filename_or_text",
+    ] = "mapped_only"
     context_policy: ContextPolicy = ContextPolicy.AUTO
     context_mix: Dict[str, float] = Field(default_factory=dict)
     subjects: List[str] = Field(default_factory=list)

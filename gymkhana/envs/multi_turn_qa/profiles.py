@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 from dataclasses import dataclass
 from typing import Dict, Tuple
 
@@ -292,10 +293,64 @@ def select_qa_subcategory(
             return "definitions"
         if any(
             token in content_signals
-            for token in ("प्रक्रिया", "कार्यविधि", "निवेदन")
+            for token in (
+                "अधिकार",
+                "हक",
+                "कर्तव्य",
+                "दायित्व",
+                "जिम्मेवारी",
+                "right",
+                "duty",
+                "obligation",
+            )
+        ):
+            return "rights_and_duties"
+        if any(
+            token in content_signals
+            for token in (
+                "प्रक्रिया",
+                "कार्यविधि",
+                "निवेदन",
+                "दर्ता",
+                "म्याद",
+                "procedure",
+                "application process",
+            )
         ):
             return "procedure"
-        return "statutory_interpretation"
+        if any(
+            token in content_signals
+            for token in (
+                "यदि",
+                "अवस्थामा",
+                "विवाद",
+                "कसूर गरेमा",
+                "hypothetical",
+                "scenario",
+                "in the event",
+            )
+        ):
+            return "scenario_application"
+        if any(
+            token in content_signals
+            for token in (
+                "दफा",
+                "उपदफा",
+                "नियम",
+                "ऐन",
+                "regulation",
+                "section",
+                "statute",
+            )
+        ):
+            return "statutory_interpretation"
+
+        # Some legal sources have no reliable lexical signal. Distribute those
+        # deterministically across every declared subtype instead of silently
+        # collapsing all of them into statutory interpretation.
+        digest = hashlib.sha256(content_signals.encode("utf-8")).digest()
+        bucket = int.from_bytes(digest[:8], "big") % len(profile.subcategories)
+        return profile.subcategories[bucket]
     return profile.subcategories[0]
 
 

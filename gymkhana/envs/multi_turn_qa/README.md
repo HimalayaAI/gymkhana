@@ -15,7 +15,10 @@ The built-in profiles are `textbook`, `legal`, `health`, `finance`,
 `agriculture`, `ecommerce`, `banking`, and `general`. Each profile supplies its
 own questioner rules, answerer rules, subcategories, and default context mix.
 High-stakes profiles use visible source grounding and reject unsupported judge
-outputs.
+outputs. When a profile requires grounding, even deterministic answers are sent
+to the judge and must receive full grounding and visible-context-sufficiency
+marks. Judge totals use a 0–10 rubric and are normalized to 0–1 before applying
+`acceptance_threshold`.
 
 Textbook subcategories are `conceptual`, `factual`, `math_stem`, `literature`,
 `procedural`, and `source_analysis`. The dataset's `subject` is authoritative
@@ -69,6 +72,11 @@ dataset's fields to `id`, `text`, `source`, `subject`, `title`, `language`,
 `license`, `jurisdiction`, and `document_date`. No dataset-specific runner or
 shell script is needed. Text sources can be local JSON/JSONL or Hugging Face
 datasets; PDF rows use the Hugging Face `Pdf` feature or a path/bytes mapping.
+
+For PDFs without a mapped date field, `document_date_strategy` can fall back to
+dates in the filename and then the document text. The legal configuration uses
+`mapped_or_filename_or_text` and records `document_date_source` in provenance;
+the original date text is preserved without guessing a calendar conversion.
 
 Each run writes accepted ShareGPT JSONL, a full audit JSONL with private plans
 and verifier results, a summary JSON, and `run.log` under `dataset.output_dir`.

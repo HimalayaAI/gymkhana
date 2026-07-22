@@ -7,15 +7,39 @@ import io
 import json
 import logging
 import re
+import unicodedata
 from itertools import islice
 from pathlib import Path
 from typing import Any, Iterable, Iterator, Mapping, Optional
+from urllib.parse import unquote
 
 from .models import MultiTurnQAConfig, SourceDocument
 from .profiles import DomainProfile
 
 
 logger = logging.getLogger(__name__)
+
+DATE_DIGITS = "0-9०-९"
+NEPALI_DATE_DIGITS = str.maketrans("०१२३४५६७८९", "0123456789")
+FULL_DATE_RE = re.compile(
+    rf"(?<![{DATE_DIGITS}])"
+    rf"(?P<date>(?P<year>[12१२][{DATE_DIGITS}]{{3}})\s*[-/.।]\s*"
+    rf"[{DATE_DIGITS}]{{1,2}}\s*[-/.।]\s*[{DATE_DIGITS}]{{1,2}})"
+    rf"(?![{DATE_DIGITS}])"
+)
+MARKED_YEAR_RE = re.compile(
+    rf"(?:"
+    rf"(?P<year_before>[12१२][{DATE_DIGITS}]{{3}})\s*"
+    rf"(?:साल|वि\.?\s*सं\.?|बि\.?\s*सं\.?|B\.?S\.?|A\.?D\.?)"
+    rf"|"
+    rf"(?:साल|वि\.?\s*सं\.?|बि\.?\s*सं\.?|B\.?S\.?|A\.?D\.?)\s*"
+    rf"(?P<year_after>[12१२][{DATE_DIGITS}]{{3}})"
+    rf")",
+    re.IGNORECASE,
+)
+STANDALONE_YEAR_RE = re.compile(
+    rf"(?<![{DATE_DIGITS}])(?P<year>[12१२][{DATE_DIGITS}]{{3}})(?![{DATE_DIGITS}])"
+)
 
 
 def json_safe(value: Any) -> Any:
@@ -153,6 +177,61 @@ class SourceLoader:
         return row.get(source) if source else None
 
     @staticmethod
+    def _valid_year(value: str) -> bool:
+        try:
+            year = int(value.translate(NEPALI_DATE_DIGITS))
+        except ValueError:
+            return False
+        return 1800 <= year <= 2199
+
+    @classmethod
+    def _date_from_text(
+        cls,
+        value: str,
+        *,
+        allow_standalone: bool,
+    ) -> Optional[str]:
+        normalized = unicodedata.normalize("NFC", value)
+        for match in FULL_DATE_RE.finditer(normalized):
+            if cls._valid_year(match.group("year")):
+                return re.sub(r"\s+", "", match.group("date"))
+        for match in MARKED_YEAR_RE.finditer(normalized):
+            year = match.group("year_before") or match.group("year_after")
+            if year and cls._valid_year(year):
+                return year
+        if allow_standalone:
+            for match in STANDALONE_YEAR_RE.finditer(normalized):
+                year = match.group("year")
+                if cls._valid_year(year):
+                    return year
+        return None
+
+    def _resolve_document_date(
+        self,
+        row: Mapping[str, Any],
+        *,
+        title: Optional[str],
+        text: str,
+        title_source: str,
+    ) -> tuple[Optional[str], Optional[str]]:
+        mapped = self._mapped_value(row, "document_date")
+        if mapped is not None and str(mapped).strip():
+            return str(mapped).strip(), "mapped"
+
+        strategy = self.config.generation.document_date_strategy
+        if strategy == "mapped_only":
+            return None, None
+        if title:
+            derived = self._date_from_text(title, allow_standalone=True)
+            if derived:
+                return derived, title_source
+        if strategy == "mapped_or_filename_or_text":
+            derived = self._date_from_text(text[:12000], allow_standalone=False)
+            if derived:
+                return derived, "text"
+        return None, None
+
+    @staticmethod
     def _is_frontmatter(title: str) -> bool:
         lowered = title.casefold()
         return bool(
@@ -186,6 +265,14 @@ class SourceLoader:
         metadata["dataset_name"] = self.config.dataset.dataset_name or "in-memory"
         metadata["dataset_split"] = self.config.dataset.dataset_split
         metadata["row_index"] = row_index
+        document_date, document_date_source = self._resolve_document_date(
+            row,
+            title=title,
+            text=text,
+            title_source="title",
+        )
+        if document_date_source:
+            metadata["document_date_source"] = document_date_source
         return SourceDocument(
             id=doc_id,
             text=text,
@@ -216,11 +303,7 @@ class SourceLoader:
                 if self._mapped_value(row, "jurisdiction") is not None
                 else None
             ),
-            document_date=(
-                str(self._mapped_value(row, "document_date"))
-                if self._mapped_value(row, "document_date") is not None
-                else None
-            ),
+            document_date=document_date,
             metadata=metadata,
         )
 
@@ -229,7 +312,7 @@ class SourceLoader:
         if isinstance(pdf_value, Mapping):
             path = pdf_value.get("path") or pdf_value.get("src")
             if path:
-                return Path(str(path).split("?")[0]).name
+                return unquote(Path(str(path).split("?")[0]).name)
         return f"document-{row_index}.pdf"
 
     @staticmethod
@@ -324,6 +407,12 @@ class SourceLoader:
         pdf_value = self._mapped_value(row, "pdf") or row.get("pdf")
         title = self._pdf_title(pdf_value, row_index)
         pages = self._extract_pdf_pages(pdf_value)
+        document_date, document_date_source = self._resolve_document_date(
+            row,
+            title=title,
+            text="\n".join(text for _, text in pages[:3]),
+            title_source="filename",
+        )
         settings = self.config.generation
         chunks = self._chunk_pages(
             pages,
@@ -342,6 +431,7 @@ class SourceLoader:
                     language=self.config.generation.source_language or "ne",
                     license=self.config.generation.source_license,
                     jurisdiction=profile.jurisdiction,
+                    document_date=document_date,
                     page_start=page_start,
                     page_end=page_end,
                     metadata={
@@ -350,6 +440,11 @@ class SourceLoader:
                         "row_index": row_index,
                         "pdf_title": title,
                         "chunk_index": chunk_index,
+                        **(
+                            {"document_date_source": document_date_source}
+                            if document_date_source
+                            else {}
+                        ),
                     },
                 )
             )

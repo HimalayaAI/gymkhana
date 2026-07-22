@@ -35,6 +35,12 @@ Compare against the private reference answer without requiring identical wording
 For legal, health, finance, or banking content, penalize unsupported certainty,
 missing qualifications, and personalized advice.
 
+Domain profile requirements:
+{profile_instructions}
+
+Source-grounding requirement:
+{source_grounding_requirement}
+
 Question:
 {prompt}
 
@@ -59,6 +65,8 @@ Return ONLY this JSON object:
   "total_score": <0-10>,
   "reasoning": "<brief explanation>"
 }}
+total_score must equal the four component scores and therefore use the 0–10
+scale. The environment normalizes that total to 0–1 before acceptance.
 """
 
 DEVANAGARI_RE = re.compile(r"[\u0900-\u097f]")
@@ -235,7 +243,11 @@ class QAVerifier:
             if score < 1.0:
                 reasons.append("deterministic_verification_failed")
 
-        requires_judge = not deterministic or self.settings.judge_deterministic_answers
+        requires_judge = (
+            profile.require_source_grounding
+            or not deterministic
+            or self.settings.judge_deterministic_answers
+        )
         if requires_judge:
             if self.judge_settings is None:
                 reasons.append("llm_judge_not_configured")
@@ -251,6 +263,19 @@ class QAVerifier:
                     inference_service=self.inference_service,
                     extra_context={
                         "profile": profile.name,
+                        "profile_instructions": (
+                            "Questioner rules:\n"
+                            f"{profile.questioner_instructions}\n\n"
+                            "Answerer rules:\n"
+                            f"{profile.answerer_instructions}"
+                        ),
+                        "source_grounding_requirement": (
+                            "Required. Reject answers that are not fully supported by "
+                            "the visible context, even if they happen to agree with the "
+                            "private source."
+                            if profile.require_source_grounding
+                            else "Apply the context policy and domain rules above."
+                        ),
                         "source_context": source.text[: self.settings.max_context_chars],
                         "visible_context": json.dumps(
                             visible_messages, ensure_ascii=False
@@ -258,7 +283,9 @@ class QAVerifier:
                     },
                 )
                 details["judge"] = {
-                    "score": judge.normalized_score,
+                    "raw_score": judge.score,
+                    "normalized_score": judge.normalized_score,
+                    "score_scale": "0_to_1",
                     "error": judge.error,
                     "parsed": json_safe(judge.parsed),
                 }
@@ -269,6 +296,18 @@ class QAVerifier:
                     score = min(score, judge.normalized_score)
                 else:
                     score = judge.normalized_score
+                if profile.require_source_grounding and not judge.error:
+                    grounding = judge.parsed.get("grounding")
+                    visible_context_sufficiency = judge.parsed.get(
+                        "visible_context_sufficiency"
+                    )
+                    if not isinstance(grounding, (int, float)) or grounding < 2:
+                        reasons.append("source_grounding_below_required")
+                    if (
+                        not isinstance(visible_context_sufficiency, (int, float))
+                        or visible_context_sufficiency < 2
+                    ):
+                        reasons.append("visible_context_sufficiency_below_required")
                 if score < self.settings.acceptance_threshold:
                     reasons.append("judge_score_below_threshold")
 

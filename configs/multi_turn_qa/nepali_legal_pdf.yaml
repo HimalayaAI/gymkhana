@@ -23,7 +23,7 @@ dataset:
     language: null
     license: null
     jurisdiction: null
-    document_date: null
+    document_date: document_date
     pdf: pdf
 
 generation:
@@ -33,6 +33,7 @@ generation:
   target_language: ne-Deva
   source_language: ne
   source_kind: pdf
+  document_date_strategy: mapped_or_filename_or_text
   context_policy: inline_excerpt
   difficulty_profile: [recall, application, analysis]
   chunk_size_chars: 3500

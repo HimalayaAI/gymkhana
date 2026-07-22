@@ -15,7 +15,7 @@ from gymkhana.envs.multi_turn_qa import (
     PROFILES,
     QAGenerationSettings,
 )
-from gymkhana.envs.multi_turn_qa.profiles import get_profile
+from gymkhana.envs.multi_turn_qa.profiles import get_profile, select_qa_subcategory
 from gymkhana.envs.multi_turn_qa.sources import SourceLoader
 from gymkhana.run import load_environment_config
 
@@ -96,6 +96,27 @@ JUDGE_PASS = json.dumps(
 )
 
 
+def judge_result(
+    *,
+    total_score: int,
+    grounding: int = 2,
+    visible_context_sufficiency: int = 2,
+) -> str:
+    return json.dumps(
+        {
+            "accuracy": max(
+                0,
+                total_score - grounding - visible_context_sufficiency - 2,
+            ),
+            "visible_context_sufficiency": visible_context_sufficiency,
+            "grounding": grounding,
+            "clarity_and_instruction_following": 2,
+            "total_score": total_score,
+            "reasoning": "Scripted judge result.",
+        }
+    )
+
+
 def base_config(tmp_path: Path, *, turns: int = 2):
     config = MultiTurnQAEnv.default_config.model_copy(deep=True)
     config.dataset.output_dir = str(tmp_path)
@@ -168,6 +189,31 @@ def test_checked_in_dataset_configs_load_typed_settings() -> None:
     assert legal.dataset.dataset_name == "w4ashabii/nepali_legal_pdf"
     assert legal.dataset.dataset_split == "validation"
     assert legal.generation.source_kind == "pdf"
+    assert legal.generation.document_date_strategy == "mapped_or_filename_or_text"
+
+
+def test_all_legal_subcategories_are_reachable_under_auto() -> None:
+    profile = get_profile("legal")
+    signaled_cases = {
+        "definitions": "यस परिच्छेदमा सेवाको परिभाषा दिइएको छ।",
+        "rights_and_duties": "नागरिकको अधिकार र निकायको कर्तव्य उल्लेख छ।",
+        "procedure": "निवेदन दर्ता गर्ने प्रक्रिया यहाँ उल्लेख छ।",
+        "statutory_interpretation": "दफा ३ को उपदफा २ यस विषयमा लागू हुन्छ।",
+        "scenario_application": "यदि यस्तो विवाद भएमा के व्यवस्था लागू हुन्छ?",
+    }
+    for expected, text in signaled_cases.items():
+        assert select_qa_subcategory(profile, "कानून", "", text) == expected
+
+    fallback_categories = {
+        select_qa_subcategory(
+            profile,
+            "कानून",
+            f"तटस्थ शीर्षक {index}",
+            "सामग्री",
+        )
+        for index in range(100)
+    }
+    assert fallback_categories == set(profile.subcategories)
 
 
 def test_textbook_loader_maps_schema_and_skips_frontmatter(tmp_path: Path) -> None:
@@ -211,6 +257,7 @@ def test_pdf_rows_become_page_aware_chunks(
     config.generation.chunk_size_chars = 500
     config.generation.chunk_overlap_chars = 50
     config.generation.max_chunks_per_document = 2
+    config.generation.document_date_strategy = "mapped_or_filename_or_text"
     config.dataset.limit = 2
     pages = [(1, "क" * 450), (2, "ख" * 450), (3, "ग" * 450)]
     monkeypatch.setattr(
@@ -220,15 +267,19 @@ def test_pdf_rows_become_page_aware_chunks(
     )
     env = MultiTurnQAEnv(
         config=config,
-        records=[{"pdf": {"path": "कानून.pdf"}}],
+        records=[{"pdf": {"path": "कानून-२०७९.pdf"}}],
     )
 
     tasks = env.load_tasks()
 
     assert len(tasks) == 2
-    assert tasks[0].metadata["source_provenance"]["pdf_title"] == "कानून.pdf"
+    assert tasks[0].metadata["source_provenance"]["pdf_title"] == "कानून-२०७९.pdf"
     assert tasks[0].metadata["source_provenance"]["page_start"] == 1
     assert tasks[1].metadata["source_provenance"]["page_end"] >= 2
+    assert tasks[0].metadata["source_provenance"]["document_date"] == "२०७९"
+    assert tasks[0].metadata["source_provenance"]["document_date_source"] == (
+        "filename"
+    )
 
 
 def test_profile_context_routing_is_source_safe(tmp_path: Path) -> None:
@@ -324,12 +375,94 @@ async def test_two_agent_multiturn_run_exports_only_visible_context(tmp_path: Pa
         answerer_calls[0], ensure_ascii=False
     )
 
+    judge_calls = [
+        call
+        for call in inference.calls
+        if call["system_prompt"]
+        == "You are a precise evaluation judge. Follow the output format exactly."
+    ]
+    assert len(judge_calls) == 2
+    judge_prompt = judge_calls[0]["messages"][0]["content"]
+    assert "Generate educational questions answerable strictly" in judge_prompt
+    assert "Answer only from the visible legal excerpt" in judge_prompt
+    assert "Source-grounding requirement:\nRequired." in judge_prompt
+
     audit = Path(summary.artifacts["audit_jsonl"]).read_text(encoding="utf-8")
     audit_row = json.loads(audit)
     assert audit_row["result_metadata"]["private_source_text"].endswith(
         "PRIVATE_MARKER"
     )
     assert len(audit_row["result_metadata"]["question_plans"]) == 2
+
+
+@pytest.mark.asyncio
+async def test_source_grounded_profile_forces_judge_and_grounding_gate(
+    tmp_path: Path,
+) -> None:
+    excerpt = "नियम १ अनुसार दस्तुर ४२ रुपैयाँ हो।"
+    responses = [
+        question_draft(
+            question="नियमअनुसार दस्तुर कति हो?",
+            expected_answer="४२",
+            subcategory="definitions",
+            visible_context=excerpt,
+            evidence=[excerpt],
+            answer_type="exact",
+            verifier="exact",
+        ),
+        "उत्तर ४२ रुपैयाँ हो।",
+        judge_result(total_score=9, grounding=1),
+    ]
+    inference = ScriptedInference(responses=responses)
+    config = base_config(tmp_path, turns=1)
+    env = MultiTurnQAEnv(
+        config=config,
+        records=[{"id": "grounding", "text": SOURCE + excerpt}],
+        services=ServiceContainer(inference=inference),
+    )
+
+    summary = await env.run()
+
+    assert len(inference.calls) == 3
+    assert summary.accepted == 0
+    evaluation = summary.results[0].metadata["conversation_evaluation"]["turns"][0]
+    assert evaluation["score"] == 0.9
+    assert "source_grounding_below_required" in evaluation["reasons"]
+
+
+@pytest.mark.asyncio
+async def test_judge_score_is_normalized_before_threshold(tmp_path: Path) -> None:
+    excerpt = "नियम १ अनुसार यस नियमावलीको नाम परीक्षण नियमावली हो।"
+    responses = [
+        question_draft(
+            question="यस नियमावलीको नाम के हो?",
+            expected_answer="परीक्षण नियमावली",
+            subcategory="conceptual",
+            visible_context=excerpt,
+            evidence=[excerpt],
+        ),
+        "यसको नाम परीक्षण नियमावली हो।",
+        judge_result(total_score=7),
+    ]
+    inference = ScriptedInference(responses=responses)
+    config = base_config(tmp_path, turns=1)
+    config.generation.profile = "general"
+    config.generation.subcategory = "conceptual"
+    config.generation.acceptance_threshold = 0.8
+    env = MultiTurnQAEnv(
+        config=config,
+        records=[{"id": "normalized-score", "text": SOURCE}],
+        services=ServiceContainer(inference=inference),
+    )
+
+    summary = await env.run()
+
+    assert summary.accepted == 0
+    evaluation = summary.results[0].metadata["conversation_evaluation"]["turns"][0]
+    assert evaluation["score"] == 0.7
+    assert evaluation["details"]["judge"]["raw_score"] == 7
+    assert evaluation["details"]["judge"]["normalized_score"] == 0.7
+    assert "judge_score_below_threshold" in evaluation["reasons"]
 
 
 @pytest.mark.asyncio
