@@ -68,7 +68,7 @@ def load_environment_config(
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Generate interleaved reasoning + code training data"
+        description="Generate verified training trajectories and SFT datasets"
     )
 
     parser.add_argument(
@@ -76,7 +76,7 @@ def main():
         default=None,
         help=(
             "Partial YAML config (e.g., "
-            "configs/english_sharegpt_to_nepali/openhermes.yaml)"
+            "configs/multi_turn_qa/nepali_textbooks.yaml)"
         ),
     )
     parser.add_argument(
@@ -91,6 +91,7 @@ def main():
             "tool-use-singleturn",
             "romanized-nepali",
             "english-sharegpt-to-nepali",
+            "multi-turn-qa",
         ],
         default=None,
         help="Task environment (overrides config)"
@@ -131,6 +132,28 @@ def main():
         "--judge-model",
         default=None,
         help="Semantic judge model (overrides config)",
+    )
+    parser.add_argument(
+        "--questioner-model",
+        default=None,
+        help="Questioner model for multi-agent QA generation (overrides config)",
+    )
+    parser.add_argument(
+        "--qa-profile",
+        default=None,
+        help="QA domain profile such as textbook, legal, health, or finance",
+    )
+    parser.add_argument(
+        "--qa-turns",
+        type=int,
+        default=None,
+        help="Number of generated QA turns; use 1 for single-turn generation",
+    )
+    parser.add_argument(
+        "--target-language",
+        choices=["en", "ne-Deva", "ne-Latn"],
+        default=None,
+        help="Target language/script for QA generation",
     )
     parser.add_argument(
         "--client",
@@ -246,6 +269,22 @@ def main():
                 "--judge-model requires an environment with LLM judge settings"
             )
         config.llm_judge.model = args.judge_model
+    if args.questioner_model:
+        if not hasattr(config, "questioner_llm"):
+            raise ValueError("--questioner-model requires a multi-agent environment")
+        config.questioner_llm.model = args.questioner_model
+    if args.qa_profile:
+        if not hasattr(config, "generation"):
+            raise ValueError("--qa-profile requires a QA generation environment")
+        config.generation.profile = args.qa_profile
+    if args.qa_turns is not None:
+        if not hasattr(config, "generation"):
+            raise ValueError("--qa-turns requires a QA generation environment")
+        config.generation.turns = args.qa_turns
+    if args.target_language:
+        if not hasattr(config, "generation"):
+            raise ValueError("--target-language requires a QA generation environment")
+        config.generation.target_language = args.target_language
 
     if args.limit is not None:
         config.dataset.limit = args.limit

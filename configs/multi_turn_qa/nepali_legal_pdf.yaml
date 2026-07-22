@@ -1,0 +1,41 @@
+# Source-grounded Nepal legal QA from raw PDF documents.
+name: multi-turn-qa
+
+dataset:
+  dataset_name: w4ashabii/nepali_legal_pdf
+  dataset_backend: huggingface
+  dataset_split: validation
+  dataset_offset: 0
+  limit: 100
+  batch_size: 2
+  num_rollouts: 1
+  output_dir: outputs/multi_turn_qa/nepali_legal
+  output_basename: nepali_legal_qa
+  output_sharegpt: true
+  output_audit_jsonl: true
+  field_mapping:
+    id: null
+    text: null
+    source: null
+    subject: null
+    grade: null
+    title: null
+    language: null
+    license: null
+    jurisdiction: null
+    document_date: null
+    pdf: pdf
+
+generation:
+  profile: legal
+  subcategory: auto
+  turns: 3
+  target_language: ne-Deva
+  source_language: ne
+  source_kind: pdf
+  context_policy: inline_excerpt
+  difficulty_profile: [recall, application, analysis]
+  chunk_size_chars: 3500
+  chunk_overlap_chars: 250
+  max_chunks_per_document: 4
+  acceptance_threshold: 0.80

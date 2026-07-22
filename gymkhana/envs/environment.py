@@ -845,6 +845,7 @@ class Environment(BaseModel, ABC):
                             "translation_semantic_evaluation": result_metadata.get(
                                 "translation_semantic_evaluation"
                             ),
+                            "result_metadata": result_metadata,
                             "error": export_error,
                         }
                         audit_handle.write(
@@ -1098,7 +1099,7 @@ class Environment(BaseModel, ABC):
             async with semaphore:
                 try:
                     result = await self.run_task(task)
-                    self.stats.record(result)
+                    self.stats.record(result, result.answer_correct)
                     status = "completed" if result.success else "failed"
                     return result
                 except asyncio.CancelledError:
