@@ -1,6 +1,7 @@
 import json
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+from uuid import uuid4
 
 import pytest
 from pydantic import Field
@@ -55,6 +56,42 @@ NEPALI = [
     {"from": "human", "value": "नेपालको राजधानी के हो?"},
     {"from": "gpt", "value": "नेपालको राजधानी काठमाडौं हो।"},
 ]
+
+JUDGE_PASS = json.dumps(
+    {"score": 10, "reasoning": "Faithful and complete translation."}
+)
+JUDGE_FAIL = json.dumps(
+    {"score": 0, "reasoning": "The candidate does not preserve the source meaning."}
+)
+
+
+class CapturingInserter:
+    def __init__(self) -> None:
+        self.sharegpt_rows: List[Dict[str, Any]] = []
+
+    async def insert_trajectory(self, **kwargs: Any) -> Any:
+        return uuid4()
+
+    async def insert_sharegpt_dataset(self, **kwargs: Any) -> bool:
+        self.sharegpt_rows.append(kwargs)
+        return True
+
+    async def insert_rollout_group(self, group: Any) -> Any:
+        return uuid4()
+
+    async def insert_rollout(self, rollout: Any, rollout_group_id: Any) -> None:
+        return None
+
+    async def update_rollout(self, rollout: Any) -> None:
+        return None
+
+    async def link_rollout_to_trajectory(
+        self, rollout_id: Any, trajectory_id: Any
+    ) -> None:
+        return None
+
+    async def update_rollout_group_statistics(self, *args: Any) -> None:
+        return None
 
 
 def test_environment_is_registered_with_canonical_aliases() -> None:
@@ -230,7 +267,7 @@ def test_reward_requires_protected_code_math_urls_and_numbers() -> None:
 
 @pytest.mark.asyncio
 async def test_run_task_scores_and_exports_only_translated_conversation() -> None:
-    inference = ScriptedInference(responses=[encoded(NEPALI)])
+    inference = ScriptedInference(responses=[encoded(NEPALI), JUDGE_PASS])
     env = EnglishShareGPTToNepaliEnv(
         records=[{"id": "one", "conversations": SOURCE}],
         services=ServiceContainer(inference=inference),
@@ -242,16 +279,89 @@ async def test_run_task_scores_and_exports_only_translated_conversation() -> Non
 
     assert result.total_reward == pytest.approx(1.0)
     assert result.answer_correct is True
-    assert result.reward_function == "sharegpt-nepali-structural-v1"
+    assert result.reward_function == "sharegpt-nepali-semantic-v2"
     assert env.build_sharegpt_conversations(result, task) == NEPALI
+    assert len(inference.calls) == 2
     assert inference.calls[0]["system_prompt"]
     assert "<source_conversation>" in inference.calls[0]["messages"][0]["content"]
 
 
 @pytest.mark.asyncio
+async def test_semantic_judge_rejects_unrelated_devanagari_without_reference() -> None:
+    unrelated = [
+        {"from": "human", "value": "क"},
+        {"from": "gpt", "value": "क"},
+    ]
+    inference = ScriptedInference(responses=[encoded(unrelated), JUDGE_FAIL])
+    env = EnglishShareGPTToNepaliEnv(
+        records=[{"id": "unrelated", "conversations": SOURCE}],
+        services=ServiceContainer(inference=inference),
+    )
+    env.config.dataset.num_rollouts = 1
+    await env.setup()
+    task = env.load_tasks()[0]
+
+    result = await env.run_task(task)
+
+    assert result.total_reward < 0.8
+    assert result.answer_correct is False
+    assert result.metadata["translation_semantic_evaluation"]["score"] == 0.0
+    assert env.build_sharegpt_conversations(result, task) is None
+
+
+@pytest.mark.asyncio
+async def test_reference_free_reward_fails_closed_without_a_judge() -> None:
+    inference = ScriptedInference(responses=[encoded(NEPALI)])
+    config = EnglishShareGPTToNepaliEnv.default_config.model_copy(deep=True)
+    config.llm_judge = None
+    config.dataset.num_rollouts = 1
+    env = EnglishShareGPTToNepaliEnv(
+        config=config,
+        records=[{"id": "no-judge", "conversations": SOURCE}],
+        services=ServiceContainer(inference=inference),
+    )
+    await env.setup()
+
+    result = await env.run_task(env.load_tasks()[0])
+
+    assert result.total_reward == 0.0
+    assert result.answer_correct is False
+    assert result.metadata["translation_semantic_evaluation"]["error"]
+
+
+@pytest.mark.asyncio
+async def test_reviewed_reference_is_a_deterministic_judge_alternative() -> None:
+    inference = ScriptedInference(responses=[encoded(NEPALI)])
+    config = EnglishShareGPTToNepaliEnv.default_config.model_copy(deep=True)
+    config.llm_judge = None
+    config.dataset.num_rollouts = 1
+    env = EnglishShareGPTToNepaliEnv(
+        config=config,
+        records=[
+            {
+                "id": "reviewed",
+                "conversations": SOURCE,
+                "reference_conversations": NEPALI,
+            }
+        ],
+        services=ServiceContainer(inference=inference),
+    )
+    await env.setup()
+
+    result = await env.run_task(env.load_tasks()[0])
+
+    assert result.total_reward == pytest.approx(1.0)
+    assert result.answer_correct is True
+    assert result.metadata["translation_semantic_evaluation"]["method"] == (
+        "reviewed-reference"
+    )
+    assert len(inference.calls) == 1
+
+
+@pytest.mark.asyncio
 async def test_grouped_rollout_selects_best_translation_without_api_key() -> None:
     inference = ScriptedInference(
-        responses=["not json", encoded(SOURCE), encoded(NEPALI)]
+        responses=["not json", encoded(SOURCE), encoded(NEPALI), JUDGE_PASS]
     )
     env = EnglishShareGPTToNepaliEnv(
         records=[{"id": "group", "conversations": SOURCE}],
@@ -265,7 +375,43 @@ async def test_grouped_rollout_selects_best_translation_without_api_key() -> Non
     assert best.final_answer == encoded(NEPALI)
     assert best.total_reward == pytest.approx(1.0)
     assert best.answer_correct is True
-    assert len(inference.calls) == 3
+    assert len(inference.calls) == 4
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("num_rollouts", [1, 2])
+async def test_export_preserves_source_provenance_for_all_rollout_paths(
+    num_rollouts: int,
+) -> None:
+    responses = [encoded(NEPALI)] * num_rollouts + [JUDGE_PASS] * num_rollouts
+    inference = ScriptedInference(responses=responses)
+    inserter = CapturingInserter()
+    env = EnglishShareGPTToNepaliEnv(
+        records=[
+            {
+                "id": "licensed-source-row",
+                "source": "OpenHermes",
+                "license": "apache-2.0",
+                "conversations": SOURCE,
+            }
+        ],
+        services=ServiceContainer(inference=inference),
+        data_inserter=inserter,
+        num_rollouts=num_rollouts,
+    )
+    env.config.dataset.num_rollouts = num_rollouts
+
+    if num_rollouts == 1:
+        await env.run()
+    else:
+        await env.setup()
+        await env.run_task(env.load_tasks()[0])
+
+    assert len(inserter.sharegpt_rows) == num_rollouts
+    for row in inserter.sharegpt_rows:
+        assert row["metadata"]["source_provenance"]["source"] == "OpenHermes"
+        assert row["metadata"]["source_provenance"]["license"] == "apache-2.0"
+        assert row["metadata"]["input_format"] == "sharegpt"
 
 
 def test_builder_refuses_low_reward_or_role_corruption() -> None:

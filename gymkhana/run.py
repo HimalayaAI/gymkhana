@@ -60,6 +60,11 @@ def main():
         help="Main model (overrides config)"
     )
     parser.add_argument(
+        "--judge-model",
+        default=None,
+        help="Semantic judge model (overrides config)",
+    )
+    parser.add_argument(
         "--client",
         choices=["openai", "anthropic", "litellm"],
         default=None,
@@ -153,6 +158,12 @@ def main():
         config.llm.model = args.model
     if args.client and config.llm is not None:
         config.llm.client = client_map[args.client]
+    if args.judge_model:
+        if config.llm_judge is None:
+            raise ValueError(
+                "--judge-model requires an environment with LLM judge settings"
+            )
+        config.llm_judge.model = args.judge_model
 
     if args.limit is not None:
         config.dataset.limit = args.limit
@@ -198,6 +209,8 @@ def main():
     model_identifier = getattr(llm_config, "model_identifier", llm_config.model)
     client_name = getattr(llm_config.client, "value", str(llm_config.client))
     print(f"Model:        {model_identifier} ({client_name})")
+    if config.llm_judge:
+        print(f"Judge model:  {config.llm_judge.model}")
     print(f"Mode:         {config.interaction_mode.value}")
 
     # Display mode-specific settings

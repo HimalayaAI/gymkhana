@@ -550,17 +550,21 @@ class Environment(BaseModel, ABC):
                             # Only insert if validation passed
                             if conversations and len(conversations) > 1:
                                 logger.info(f"Inserting ShareGPT for task {task.id} rollout {i}")
+                                export_metadata = {
+                                    "env": self.name,
+                                    "success": result.success,
+                                    "final_answer": result.final_answer,
+                                    "answer_correct": result.answer_correct,
+                                    "rollout_index": i,
+                                    "rollout_group_id": str(rollout_group_id),
+                                }
+                                export_metadata.update(
+                                    self.build_sharegpt_metadata(result, task)
+                                )
                                 await self.data_inserter.insert_sharegpt_dataset(
                                     task_id=f"{task.id}_rollout_{i}",
                                     conversations=conversations,
-                                    metadata={
-                                        "env": self.name,
-                                        "success": result.success,
-                                        "final_answer": result.final_answer,
-                                        "answer_correct": result.answer_correct,
-                                        "rollout_index": i,
-                                        "rollout_group_id": str(rollout_group_id),
-                                    }
+                                    metadata=export_metadata,
                                 )
 
                     # Track for group statistics
@@ -760,6 +764,14 @@ class Environment(BaseModel, ABC):
             prev_role = sharegpt_role
 
         return conversations if valid_conversation else None
+
+    def build_sharegpt_metadata(
+        self,
+        result: TrajectoryResult,
+        task: Task,
+    ) -> Dict[str, Any]:
+        """Return environment-specific metadata for ShareGPT exports."""
+        return {}
 
     def extract_candidate_answers(self, result: TrajectoryResult) -> List[str]:
         """Collect candidate answers from a finished trajectory."""
@@ -1223,15 +1235,19 @@ class Environment(BaseModel, ABC):
                 # Only insert if we have meaningful content
                 if conversations and len(conversations) > 1:  # More than just system prompt
                     logger.info(f"Inserting ShareGPT dataset for task {task.id} with {len(conversations)} messages")
+                    export_metadata = {
+                        "env": self.name,
+                        "success": result.success,
+                        "final_answer": result.final_answer,
+                        "num_code_blocks": result.num_code_blocks,
+                    }
+                    export_metadata.update(
+                        self.build_sharegpt_metadata(result, task)
+                    )
                     await self.data_inserter.insert_sharegpt_dataset(
                         task_id=task.id,
                         conversations=conversations,
-                        metadata={
-                            "env": self.name,
-                            "success": result.success,
-                            "final_answer": result.final_answer,
-                            "num_code_blocks": result.num_code_blocks
-                        }
+                        metadata=export_metadata,
                     )
                     logger.info(f"Successfully inserted ShareGPT dataset for task {task.id}")
                 else:
