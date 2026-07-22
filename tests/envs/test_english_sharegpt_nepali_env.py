@@ -154,6 +154,31 @@ def test_loads_sharegpt_openai_and_flattened_hermes_rows() -> None:
     assert len(EnglishShareGPTToNepaliEnv(records=records).load_tasks(limit=2)) == 2
 
 
+def test_field_mapping_onboards_compatible_custom_schema() -> None:
+    config = EnglishShareGPTToNepaliEnv.default_config.model_copy(deep=True)
+    config.dataset.field_mapping = {
+        "id": "uid",
+        "conversations": "dialogue",
+    }
+    env = EnglishShareGPTToNepaliEnv(
+        config=config,
+        records=[
+            {
+                "uid": "custom-row",
+                "dialogue": SOURCE,
+                "license": "cc-by-4.0",
+            }
+        ],
+    )
+
+    task = env.load_tasks()[0]
+
+    assert task.id == "custom-row"
+    assert task.metadata["source_conversations"] == SOURCE
+    assert task.metadata["source_provenance"]["license"] == "cc-by-4.0"
+    assert "dialogue" not in task.metadata["source_provenance"]
+
+
 def test_local_jsonl_loader_and_stable_hash_id(tmp_path: Path) -> None:
     path = tmp_path / "hermes.jsonl"
     path.write_text(
@@ -170,6 +195,46 @@ def test_local_jsonl_loader_and_stable_hash_id(tmp_path: Path) -> None:
     assert first.id == second.id
     assert first.id.startswith("sharegpt-")
     assert first.metadata["source_provenance"]["dataset_name"] == str(path)
+
+
+def test_huggingface_rows_backend_supports_bounded_offset_loading(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: List[Dict[str, Any]] = []
+
+    class Response:
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self) -> Dict[str, Any]:
+            return {
+                "rows": [
+                    {"row": {"id": "row-25", "conversations": SOURCE}},
+                    {"row": {"id": "row-26", "conversations": SOURCE}},
+                ],
+                "num_rows_total": 1000,
+            }
+
+    def fake_get(url: str, **kwargs: Any) -> Response:
+        calls.append({"url": url, **kwargs})
+        return Response()
+
+    monkeypatch.setattr("requests.get", fake_get)
+    config = EnglishShareGPTToNepaliEnv.default_config.model_copy(deep=True)
+    config.dataset.dataset_name = "teknium/OpenHermes-2.5"
+    config.dataset.dataset_backend = "huggingface-rows"
+    config.dataset.dataset_config = "default"
+    config.dataset.dataset_offset = 25
+    config.dataset.limit = 2
+
+    tasks = EnglishShareGPTToNepaliEnv(config=config).load_tasks()
+
+    assert [task.id for task in tasks] == ["row-25", "row-26"]
+    assert [
+        task.metadata["source_provenance"]["row_index"] for task in tasks
+    ] == [25, 26]
+    assert calls[0]["params"]["offset"] == 25
+    assert calls[0]["params"]["length"] == 2
 
 
 def test_normalizes_openai_text_parts_and_rejects_bad_roles() -> None:
@@ -392,6 +457,7 @@ async def test_grouped_rollout_selects_best_translation_without_api_key() -> Non
 @pytest.mark.parametrize("num_rollouts", [1, 2])
 async def test_export_preserves_source_provenance_for_all_rollout_paths(
     num_rollouts: int,
+    tmp_path: Path,
 ) -> None:
     responses = [encoded(NEPALI)] * num_rollouts + [JUDGE_PASS] * num_rollouts
     inference = ScriptedInference(responses=responses)
@@ -410,6 +476,7 @@ async def test_export_preserves_source_provenance_for_all_rollout_paths(
         num_rollouts=num_rollouts,
     )
     env.config.dataset.num_rollouts = num_rollouts
+    env.config.dataset.output_dir = str(tmp_path)
 
     if num_rollouts == 1:
         await env.run()
@@ -422,6 +489,48 @@ async def test_export_preserves_source_provenance_for_all_rollout_paths(
         assert row["metadata"]["source_provenance"]["source"] == "OpenHermes"
         assert row["metadata"]["source_provenance"]["license"] == "apache-2.0"
         assert row["metadata"]["input_format"] == "sharegpt"
+
+
+@pytest.mark.asyncio
+async def test_standard_run_writes_local_dataset_and_audit_without_storage(
+    tmp_path: Path,
+) -> None:
+    inference = ScriptedInference(responses=[encoded(NEPALI), JUDGE_PASS])
+    config = EnglishShareGPTToNepaliEnv.default_config.model_copy(deep=True)
+    config.dataset.output_dir = str(tmp_path)
+    config.dataset.output_basename = "openhermes_preview"
+    config.dataset.num_rollouts = 1
+    env = EnglishShareGPTToNepaliEnv(
+        config=config,
+        records=[
+            {
+                "id": "source-row",
+                "source": "OpenHermes",
+                "license": "apache-2.0",
+                "conversations": SOURCE,
+            }
+        ],
+        services=ServiceContainer(inference=inference),
+    )
+
+    summary = await env.run()
+
+    dataset_path = tmp_path / "openhermes_preview.jsonl"
+    audit_path = tmp_path / "openhermes_preview_audit.jsonl"
+    summary_path = tmp_path / "openhermes_preview_summary.json"
+    dataset_rows = [json.loads(line) for line in dataset_path.read_text().splitlines()]
+    audit_rows = [json.loads(line) for line in audit_path.read_text().splitlines()]
+    saved_summary = json.loads(summary_path.read_text())
+
+    assert dataset_rows[0]["conversations"] == NEPALI
+    assert dataset_rows[0]["source_provenance"]["source"] == "OpenHermes"
+    assert dataset_rows[0]["source_provenance"]["license"] == "apache-2.0"
+    assert audit_rows[0]["accepted"] is True
+    assert audit_rows[0]["source_conversations"] == SOURCE
+    assert audit_rows[0]["translation_semantic_evaluation"]["score"] == 1.0
+    assert saved_summary["accepted"] == 1
+    assert saved_summary["rejected"] == 0
+    assert summary.artifacts["sharegpt_jsonl"] == str(dataset_path.resolve())
 
 
 def test_builder_refuses_low_reward_or_role_corruption() -> None:

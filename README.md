@@ -182,6 +182,20 @@ python -m gymkhana.run \
   --num-rollouts 4
 ```
 
+Run the checked-in OpenHermes configuration through the same standard runner:
+
+```bash
+python -m gymkhana.run \
+  --config configs/english_sharegpt_to_nepali/openhermes.yaml \
+  --no-database
+```
+
+The runner writes accepted JSONL, a full audit JSONL, a summary, and `run.log`
+under the configured `output_dir`; PostgreSQL and helper scripts are optional.
+Use `--dataset-offset` and `--limit` for bounded windows. Compatible ShareGPT,
+OpenAI-message, and flattened Hermes datasets can be onboarded with YAML alone;
+see the environment README for backend and schema details.
+
 For OpenHermes or another mixed-source corpus, keep every row's provenance and
 verify the license and attribution obligations of each retained source. No
 third-party dataset rows are bundled with this environment. The full loader and

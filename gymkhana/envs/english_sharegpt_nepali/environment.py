@@ -20,6 +20,7 @@ import unicodedata
 from collections import Counter
 from dataclasses import asdict, dataclass
 from difflib import SequenceMatcher
+from itertools import islice
 from pathlib import Path
 from typing import Any, ClassVar, Iterable, Iterator, Mapping, Optional, Sequence
 
@@ -40,6 +41,19 @@ from gymkhana.envs.llm_judge import LLMJudge
 
 CANONICAL_NAME = "english-sharegpt-to-nepali"
 MIN_ACCEPTED_REWARD = 0.80
+HUGGINGFACE_ROWS_API = "https://datasets-server.huggingface.co/rows"
+DATASET_PRESETS: dict[str, dict[str, str]] = {
+    "openhermes": {
+        "dataset_name": "teknium/OpenHermes-2.5",
+        "dataset_config": "default",
+        "dataset_backend": "huggingface-rows",
+    },
+    "openhermes-2.5": {
+        "dataset_name": "teknium/OpenHermes-2.5",
+        "dataset_config": "default",
+        "dataset_backend": "huggingface-rows",
+    },
+}
 
 TRANSLATION_JUDGE_RUBRIC = """Evaluate whether a candidate Nepali conversation is a faithful translation of the English source conversation.
 
@@ -471,6 +485,52 @@ def _iter_local_records(path: Path) -> Iterator[dict[str, Any]]:
         yield row
 
 
+def _iter_huggingface_rows(
+    *,
+    dataset_name: str,
+    dataset_config: str,
+    dataset_split: str,
+    offset: int,
+    limit: Optional[int],
+) -> Iterator[dict[str, Any]]:
+    """Page through the official Hugging Face dataset viewer rows API."""
+    import requests
+
+    cursor = offset
+    remaining = limit
+    while remaining is None or remaining > 0:
+        length = min(100, remaining) if remaining is not None else 100
+        response = requests.get(
+            HUGGINGFACE_ROWS_API,
+            params={
+                "dataset": dataset_name,
+                "config": dataset_config,
+                "split": dataset_split,
+                "offset": cursor,
+                "length": length,
+            },
+            timeout=120,
+        )
+        response.raise_for_status()
+        payload = response.json()
+        rows = payload.get("rows", [])
+        if not rows:
+            break
+        for entry in rows:
+            row = entry.get("row") if isinstance(entry, Mapping) else None
+            if not isinstance(row, dict):
+                raise ValueError("Hugging Face rows API returned an invalid row")
+            yield row
+        cursor += len(rows)
+        if remaining is not None:
+            remaining -= len(rows)
+        total = payload.get("num_rows_total")
+        if isinstance(total, int) and cursor >= total:
+            break
+        if len(rows) < length:
+            break
+
+
 @register_environment(name=CANONICAL_NAME, env_type=CANONICAL_NAME)
 class EnglishShareGPTToNepaliEnv(Environment):
     """Translate complete English conversations and emit Nepali ShareGPT rows."""
@@ -498,6 +558,7 @@ class EnglishShareGPTToNepaliEnv(Environment):
             enable_rewards=True,
             reward_function="simple",
             output_dir="outputs/english_sharegpt_to_nepali",
+            output_basename="translations",
             output_sharegpt=True,
         ),
     )
@@ -515,30 +576,86 @@ class EnglishShareGPTToNepaliEnv(Environment):
             [dict(record) for record in records] if records is not None else None
         )
 
-    def _dataset_records(self) -> Iterable[Mapping[str, Any]]:
-        if self._records is not None:
-            return self._records
+    def _resolved_dataset(self) -> tuple[Optional[str], Optional[str], str]:
+        settings = self.config.dataset
+        dataset_name = settings.dataset_name
+        dataset_config = settings.dataset_config
+        backend = settings.dataset_backend
+        preset = DATASET_PRESETS.get((dataset_name or "").casefold())
+        if preset is not None:
+            dataset_name = preset["dataset_name"]
+            dataset_config = dataset_config or preset["dataset_config"]
+            if backend == "auto":
+                backend = preset["dataset_backend"]
+        return dataset_name, dataset_config, backend
 
-        dataset_name = self.config.dataset.dataset_name
+    def _dataset_records(
+        self,
+        limit: Optional[int],
+    ) -> Iterable[Mapping[str, Any]]:
+        settings = self.config.dataset
+        offset = settings.dataset_offset
+        stop = None if limit is None else offset + limit
+        if self._records is not None:
+            return islice(self._records, offset, stop)
+
+        dataset_name, dataset_config, backend = self._resolved_dataset()
         if not dataset_name:
-            return DEFAULT_ROWS
+            return islice(DEFAULT_ROWS, offset, stop)
 
         local_path = Path(dataset_name).expanduser()
-        if local_path.exists():
-            return _iter_local_records(local_path)
-        if local_path.suffix.casefold() in {".json", ".jsonl", ".ndjson"}:
+        if backend in {"auto", "local"} and local_path.exists():
+            return islice(_iter_local_records(local_path), offset, stop)
+        if backend == "local" or local_path.suffix.casefold() in {
+            ".json",
+            ".jsonl",
+            ".ndjson",
+        }:
             raise FileNotFoundError(f"dataset file does not exist: {local_path}")
+
+        if backend == "huggingface-rows":
+            return _iter_huggingface_rows(
+                dataset_name=dataset_name,
+                dataset_config=dataset_config or "default",
+                dataset_split=settings.dataset_split,
+                offset=offset,
+                limit=limit,
+            )
+        if backend not in {"auto", "huggingface"}:
+            raise ValueError(f"unsupported dataset backend: {backend}")
 
         from datasets import load_dataset
 
         kwargs: dict[str, Any] = {
-            "split": self.config.dataset.dataset_split,
+            "split": settings.dataset_split,
             "streaming": True,
         }
-        dataset_config = self.config.dataset.dataset_config
-        if dataset_config:
-            return load_dataset(dataset_name, dataset_config, **kwargs)
-        return load_dataset(dataset_name, **kwargs)
+        dataset = (
+            load_dataset(dataset_name, dataset_config, **kwargs)
+            if dataset_config
+            else load_dataset(dataset_name, **kwargs)
+        )
+        return islice(dataset, offset, stop)
+
+    def _apply_field_mapping(self, row: dict[str, Any]) -> set[str]:
+        """Map custom source keys to the canonical translation row schema."""
+        canonical_fields = {
+            "id",
+            "conversations",
+            "messages",
+            "instruction",
+            "response",
+            "system",
+        }
+        mapped_source_fields: set[str] = set()
+        for target, source in self.config.dataset.field_mapping.items():
+            if target not in canonical_fields or not source:
+                continue
+            if source in row:
+                row.setdefault(target, row[source])
+                if source != target:
+                    mapped_source_fields.add(source)
+        return mapped_source_fields
 
     def load_tasks(self, limit: Optional[int] = None) -> Sequence[Task]:
         effective_limit = limit if limit is not None else self.config.dataset.limit
@@ -546,10 +663,13 @@ class EnglishShareGPTToNepaliEnv(Environment):
             raise ValueError("limit must be non-negative")
 
         tasks: list[Task] = []
-        for row_index, raw_row in enumerate(self._dataset_records()):
-            if effective_limit is not None and len(tasks) >= effective_limit:
-                break
+        dataset_name, _, _ = self._resolved_dataset()
+        for row_index, raw_row in enumerate(
+            self._dataset_records(effective_limit),
+            start=self.config.dataset.dataset_offset,
+        ):
             row = dict(raw_row)
+            mapped_source_fields = self._apply_field_mapping(row)
             try:
                 conversations, input_format = _normalize_record(row)
                 reference = _reference_from_row(row)
@@ -563,6 +683,7 @@ class EnglishShareGPTToNepaliEnv(Environment):
                 "response",
                 "system",
                 *REFERENCE_KEYS,
+                *mapped_source_fields,
             }
             provenance = {
                 key: _json_safe(value)
@@ -570,7 +691,7 @@ class EnglishShareGPTToNepaliEnv(Environment):
                 if key not in excluded
             }
             provenance["dataset_name"] = (
-                self.config.dataset.dataset_name or "built-in-smoke-fixtures"
+                dataset_name or "built-in-smoke-fixtures"
             )
             provenance["dataset_split"] = self.config.dataset.dataset_split
             provenance["row_index"] = row_index

@@ -45,6 +45,85 @@ judge is unavailable or returns an invalid result. The default judge is
 a reviewed Nepali reference uses that reference instead and does not make a
 judge call.
 
+## Standard OpenHermes run
+
+Use the checked-in partial configuration with the standard environment runner:
+
+```bash
+python -m gymkhana.run \
+  --config configs/english_sharegpt_to_nepali/openhermes.yaml \
+  --no-database
+```
+
+The default OpenAI models can be replaced entirely from the CLI. For example:
+
+```bash
+python -m gymkhana.run \
+  --config configs/english_sharegpt_to_nepali/openhermes.yaml \
+  --model anthropic:claude-sonnet-4-6 \
+  --client anthropic \
+  --judge-model anthropic:claude-haiku-4-5 \
+  --no-database
+```
+
+No database or helper script is required. `Environment.run()` writes these
+artifacts atomically under `dataset.output_dir`:
+
+- `<output_basename>.jsonl`: accepted ShareGPT translations only
+- `<output_basename>_audit.jsonl`: every source row, raw output, reward, and
+  rejection details
+- `<output_basename>_summary.json`: counts, models, and artifact paths
+- `run.log`: runner and per-task progress logs
+
+Resume or inspect another bounded window with `--dataset-offset`; use `--limit`
+to control its size. Both flags override YAML.
+
+```bash
+python -m gymkhana.run \
+  --config configs/english_sharegpt_to_nepali/openhermes.yaml \
+  --dataset-offset 1000 \
+  --limit 100 \
+  --no-database
+```
+
+## Onboard another dataset
+
+No Python adapter is needed when a source uses one of the supported row shapes:
+ShareGPT `conversations`, OpenAI `messages`, or flattened Hermes
+`instruction`/`response`. Create a partial YAML config containing:
+
+```yaml
+name: english-sharegpt-to-nepali
+dataset:
+  dataset_name: organization/dataset-name
+  dataset_backend: huggingface-rows
+  dataset_config: default
+  dataset_split: train
+  dataset_offset: 0
+  limit: 100
+  output_dir: outputs/my_dataset_nepali
+  output_basename: my_dataset_nepali
+```
+
+`huggingface-rows` is efficient for public datasets exposed by the Hugging Face
+dataset viewer. Use `huggingface` for datasets that must be loaded through the
+`datasets` library, or `local`/`auto` for JSON and JSONL files. Unsupported row
+schemas should be added as a small normalization adapter with fixture-based
+tests, rather than embedded in the runner.
+
+When the schema is compatible but uses different field names, map it in YAML:
+
+```yaml
+dataset:
+  field_mapping:
+    id: uid
+    conversations: dialogue
+    # Or use instruction: prompt and response: completion
+```
+
+Mappings are applied before normalization, while unrelated row fields remain
+attached as source provenance.
+
 ## Reward contract
 
 The reward is in `[0, 1]`. A deterministic structural score combines strict
