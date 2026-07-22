@@ -58,6 +58,7 @@ class EnvironmentType(str, Enum):
     SWE = "swe"
     IFEVAL = "ifeval"
     ROMANIZED_NEPALI = "romanized-nepali"
+    ENGLISH_SHAREGPT_TO_NEPALI = "english-sharegpt-to-nepali"
 
 
 class REPLSettings(BaseModel):

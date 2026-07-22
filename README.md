@@ -49,6 +49,7 @@ than provider SDKs.
 | Environment | Task family |
 | --- | --- |
 | `romanized-nepali` | Bidirectional Nepali Devanagari/romanized transliteration |
+| `english-sharegpt-to-nepali` | Full-conversation English ShareGPT to Nepali ShareGPT translation |
 | `ifeval` | Verifiable instruction-following constraints |
 | `math-python` | Mathematical problem solving with a Python sandbox |
 | `hotpotqa` | Multi-hop question answering |
@@ -153,6 +154,38 @@ references are best treated as bootstrap labels. Production datasets should
 prefer reviewed references or an explicitly documented variant-aware verifier.
 Original acknowledgments, license, and third-party notices are retained under
 `gymkhana/envs/romanized_nepali/`.
+
+## English ShareGPT to Nepali
+
+`english-sharegpt-to-nepali` translates complete ShareGPT conversations into
+natural Nepali Devanagari and exports the translated conversation rather than
+the translation instruction. It accepts ShareGPT `conversations`, OpenAI-style
+`messages`, and flattened Hermes `instruction`/`response` rows from local
+JSON/JSONL files or Hugging Face datasets.
+
+The deterministic reward checks strict JSON, exact turn-role structure,
+non-empty messages, Devanagari use, and preservation of code, math, URLs, tags,
+and numbers. A reviewed Nepali reference conversation can optionally contribute
+edit-similarity reward. These checks are a corruption/format quality gate, not
+proof of semantic equivalence, so native-speaker review is still required.
+
+Translate a bounded local Hermes file:
+
+```bash
+python -m gymkhana.run \
+  --env english-sharegpt-to-nepali \
+  --dataset-name /path/to/openhermes.jsonl \
+  --model openai:gpt-4.1-mini \
+  --client openai \
+  --limit 100 \
+  --num-rollouts 4
+```
+
+For OpenHermes or another mixed-source corpus, keep every row's provenance and
+verify the license and attribution obligations of each retained source. No
+third-party dataset rows are bundled with this environment. The full loader and
+reward contract are documented in
+`gymkhana/envs/english_sharegpt_nepali/README.md`.
 
 ## Contributing a new environment
 

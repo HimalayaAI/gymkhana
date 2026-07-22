@@ -25,9 +25,34 @@ def main():
     )
     parser.add_argument(
         "--env",
-        choices=["math-python", "oolong", "code", "hotpotqa", "swe", "ifeval", "tool-use-singleturn", "romanized-nepali"],
+        choices=[
+            "math-python",
+            "oolong",
+            "code",
+            "hotpotqa",
+            "swe",
+            "ifeval",
+            "tool-use-singleturn",
+            "romanized-nepali",
+            "english-sharegpt-to-nepali",
+        ],
         default=None,
         help="Task environment (overrides config)"
+    )
+    parser.add_argument(
+        "--dataset-name",
+        default=None,
+        help="Hugging Face dataset name or local JSON/JSONL path (overrides config)",
+    )
+    parser.add_argument(
+        "--dataset-config",
+        default=None,
+        help="Optional Hugging Face dataset configuration (overrides config)",
+    )
+    parser.add_argument(
+        "--dataset-split",
+        default=None,
+        help="Dataset split (overrides config)",
     )
     parser.add_argument(
         "--model",
@@ -129,8 +154,14 @@ def main():
     if args.client and config.llm is not None:
         config.llm.client = client_map[args.client]
 
-    if args.limit:
+    if args.limit is not None:
         config.dataset.limit = args.limit
+    if args.dataset_name:
+        config.dataset.dataset_name = args.dataset_name
+    if args.dataset_config:
+        config.dataset.dataset_config = args.dataset_config
+    if args.dataset_split:
+        config.dataset.dataset_split = args.dataset_split
     if args.max_turns:
         # Only set if RLM mode
         if hasattr(config, 'repl'):
