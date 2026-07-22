@@ -20,6 +20,25 @@ be supplied in `nepali_conversations`, `reference_conversations`, or
 `translation_reference`; references are verifier-only and are never put in the
 policy prompt.
 
+## Configure credentials and run
+
+Gymkhana does not ask for API keys interactively. Each user must configure the
+API key for their selected model provider before running the environment.
+
+From the Gymkhana repository root, create a local `.env` file:
+
+```bash
+cp .env.example .env
+```
+Open .env in an editor and add your own OpenAI API key:
+```bash
+OPENAI_API_KEY=your-openai-api-key
+```
+Alternatively, configure the key only for the current terminal session:
+```bash
+export OPENAI_API_KEY="your-openai-api-key"
+```
+
 ## Reward contract
 
 The reward is in `[0, 1]`. Without a reference, it combines strict JSON/schema
