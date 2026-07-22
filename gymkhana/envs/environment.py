@@ -10,11 +10,13 @@ strategy.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import re
 from abc import ABC, abstractmethod
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, AsyncIterator, Callable, Dict, List, Optional, Sequence, Tuple, Type, TypeVar, Union
 
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
@@ -129,6 +131,9 @@ class EnvironmentRunSummary(BaseModel):
     successful: int
     failed: int
     num_errors: int = 0
+    accepted: int = 0
+    rejected: int = 0
+    artifacts: Dict[str, str] = Field(default_factory=dict)
     stats: PipelineStats
     results: List[TrajectoryResult] = Field(default_factory=list)
 
@@ -503,65 +508,26 @@ class Environment(BaseModel, ABC):
 
                     logger.debug(f"Persisted trajectory {trajectory_id} for rollout {i}")
 
-                    # Export to ShareGPT if enabled and answer is correct
-                    if self.config.dataset.output_sharegpt and result.success and result.final_answer:
-                        should_export = result.answer_correct is not False
-
-                        if should_export:
-                            # Use environment's ShareGPT builder if available
-                            conversations = None
-                            if hasattr(self, 'build_sharegpt_conversations'):
-                                conversations = self.build_sharegpt_conversations(result, task)
-
-                            # Fallback to standard format
-                            if not conversations:
-                                conversations = [{"from": "system", "value": result.system_prompt}]
-                                role_map = {"user": "human", "assistant": "gpt", "tool": "tool"}
-
-                                prev_role = "system"
-                                valid_conversation = True
-
-                                for turn in result.turns:
-                                    sharegpt_role = role_map.get(turn.role, "unknown")
-
-                                    # Validate: consecutive messages from same role should not happen
-                                    if sharegpt_role == prev_role:
-                                        logger.warning(
-                                            f"ShareGPT validation failed for task {task.id} rollout {i}: "
-                                            f"consecutive {sharegpt_role} messages detected. Skipping."
-                                        )
-                                        valid_conversation = False
-                                        break
-
-                                    # Build message value with reasoning if present
-                                    message_value = turn.content
-                                    if turn.reasoning_content and self.config.enable_reasoning:
-                                        message_value = f"<think>\n{turn.reasoning_content}\n</think>\n\n{turn.content}"
-
-                                    conversations.append({
-                                        "from": sharegpt_role,
-                                        "value": message_value
-                                    })
-                                    prev_role = sharegpt_role
-
-                                if not valid_conversation:
-                                    conversations = None
-
-                            # Only insert if validation passed
-                            if conversations and len(conversations) > 1:
-                                logger.info(f"Inserting ShareGPT for task {task.id} rollout {i}")
-                                await self.data_inserter.insert_sharegpt_dataset(
-                                    task_id=f"{task.id}_rollout_{i}",
-                                    conversations=conversations,
-                                    metadata={
-                                        "env": self.name,
-                                        "success": result.success,
-                                        "final_answer": result.final_answer,
-                                        "answer_correct": result.answer_correct,
-                                        "rollout_index": i,
-                                        "rollout_group_id": str(rollout_group_id),
-                                    }
-                                )
+                    if self.should_export_sharegpt(result, task):
+                        conversations = self.build_sharegpt_conversations(result, task)
+                        if conversations and len(conversations) > 1:
+                            logger.info(f"Inserting ShareGPT for task {task.id} rollout {i}")
+                            export_metadata = {
+                                "env": self.name,
+                                "success": result.success,
+                                "final_answer": result.final_answer,
+                                "answer_correct": result.answer_correct,
+                                "rollout_index": i,
+                                "rollout_group_id": str(rollout_group_id),
+                            }
+                            export_metadata.update(
+                                self.build_sharegpt_metadata(result, task)
+                            )
+                            await self.data_inserter.insert_sharegpt_dataset(
+                                task_id=f"{task.id}_rollout_{i}",
+                                conversations=conversations,
+                                metadata=export_metadata,
+                            )
 
                     # Track for group statistics
                     rollout_rewards.append(result.total_reward)
@@ -761,6 +727,176 @@ class Environment(BaseModel, ABC):
 
         return conversations if valid_conversation else None
 
+    def build_sharegpt_metadata(
+        self,
+        result: TrajectoryResult,
+        task: Task,
+    ) -> Dict[str, Any]:
+        """Return environment-specific metadata for ShareGPT exports."""
+        return {}
+
+    def should_export_sharegpt(
+        self,
+        result: TrajectoryResult,
+        task: Task,
+    ) -> bool:
+        """Return whether a result is eligible for ShareGPT export."""
+        if not self.config.dataset.output_sharegpt:
+            return False
+        if not result.success or not result.final_answer:
+            return False
+        if self.get_expected_answer(task) is not None:
+            return result.answer_correct is not False
+        return result.total_reward > 0.5
+
+    def _write_local_artifacts(
+        self,
+        tasks: Sequence[Task],
+        results: Sequence[Optional[TrajectoryResult]],
+    ) -> tuple[Dict[str, str], int, int]:
+        """Atomically write accepted ShareGPT rows, audit rows, and a summary."""
+        if not self.config.dataset.output_sharegpt:
+            return {}, 0, 0
+
+        output_dir = Path(self.config.dataset.output_dir).expanduser().resolve()
+        output_dir.mkdir(parents=True, exist_ok=True)
+        basename = self.config.dataset.output_basename.strip()
+        if not basename or Path(basename).name != basename:
+            raise ValueError("dataset.output_basename must be a plain filename stem")
+
+        sharegpt_path = output_dir / f"{basename}.jsonl"
+        audit_path = output_dir / f"{basename}_audit.jsonl"
+        summary_path = output_dir / f"{basename}_summary.json"
+        sharegpt_tmp = sharegpt_path.with_suffix(".jsonl.tmp")
+        audit_tmp = audit_path.with_suffix(".jsonl.tmp")
+
+        accepted = 0
+        rejected = 0
+        errors = 0
+        rewards: list[float] = []
+        audit_handle = (
+            audit_tmp.open("w", encoding="utf-8")
+            if self.config.dataset.output_audit_jsonl
+            else None
+        )
+        try:
+            with sharegpt_tmp.open("w", encoding="utf-8") as dataset_handle:
+                for task, result in zip(tasks, results):
+                    conversations = None
+                    export_error = None
+                    if result is None:
+                        errors += 1
+                    else:
+                        rewards.append(float(result.total_reward or 0.0))
+                        if self.should_export_sharegpt(result, task):
+                            try:
+                                conversations = self.build_sharegpt_conversations(
+                                    result, task
+                                )
+                            except Exception as error:  # pragma: no cover
+                                export_error = f"{type(error).__name__}: {error}"
+                                logger.exception(
+                                    "ShareGPT builder failed for task %s", task.id
+                                )
+
+                    is_accepted = bool(conversations and len(conversations) > 1)
+                    if is_accepted:
+                        accepted += 1
+                        record = {
+                            "id": task.id,
+                            "conversations": conversations,
+                        }
+                        record.update(
+                            self.build_sharegpt_metadata(result, task)  # type: ignore[arg-type]
+                        )
+                        dataset_handle.write(
+                            json.dumps(record, ensure_ascii=False, default=str) + "\n"
+                        )
+                    else:
+                        rejected += 1
+
+                    if audit_handle is not None:
+                        result_metadata = result.metadata if result is not None else {}
+                        audit_record = {
+                            "id": task.id,
+                            "accepted": is_accepted,
+                            "reward": (
+                                float(result.total_reward or 0.0)
+                                if result is not None
+                                else None
+                            ),
+                            "answer_correct": (
+                                result.answer_correct if result is not None else None
+                            ),
+                            "source_conversations": task.metadata.get(
+                                "source_conversations"
+                            ),
+                            "translated_conversations": conversations,
+                            "raw_model_output": (
+                                result.final_answer if result is not None else None
+                            ),
+                            "source_provenance": task.metadata.get(
+                                "source_provenance", {}
+                            ),
+                            "input_format": task.metadata.get("input_format"),
+                            "translation_evaluation": result_metadata.get(
+                                "translation_evaluation"
+                            ),
+                            "translation_semantic_evaluation": result_metadata.get(
+                                "translation_semantic_evaluation"
+                            ),
+                            "error": export_error,
+                        }
+                        audit_handle.write(
+                            json.dumps(
+                                audit_record,
+                                ensure_ascii=False,
+                                default=str,
+                            )
+                            + "\n"
+                        )
+        finally:
+            if audit_handle is not None:
+                audit_handle.close()
+
+        sharegpt_tmp.replace(sharegpt_path)
+        artifacts = {"sharegpt_jsonl": str(sharegpt_path)}
+        if self.config.dataset.output_audit_jsonl:
+            audit_tmp.replace(audit_path)
+            artifacts["audit_jsonl"] = str(audit_path)
+        artifacts["summary_json"] = str(summary_path)
+
+        summary_payload = {
+            "environment": self.name,
+            "dataset_name": self.config.dataset.dataset_name,
+            "dataset_split": self.config.dataset.dataset_split,
+            "dataset_offset": self.config.dataset.dataset_offset,
+            "processed": len(tasks),
+            "accepted": accepted,
+            "rejected": rejected,
+            "errors": errors,
+            "acceptance_rate": accepted / len(tasks) if tasks else 0.0,
+            "mean_reward": sum(rewards) / len(rewards) if rewards else 0.0,
+            "model": self.config.get_llm_config().model,
+            "judge_model": (
+                self.config.llm_judge.model if self.config.llm_judge else None
+            ),
+            "artifacts": artifacts,
+        }
+        summary_path.write_text(
+            json.dumps(summary_payload, ensure_ascii=False, indent=2, default=str)
+            + "\n",
+            encoding="utf-8",
+        )
+        logger.info(
+            "Local export complete | accepted=%s rejected=%s errors=%s | %s",
+            accepted,
+            rejected,
+            errors,
+            sharegpt_path,
+        )
+        return artifacts, accepted, rejected
+
     def extract_candidate_answers(self, result: TrajectoryResult) -> List[str]:
         """Collect candidate answers from a finished trajectory."""
 
@@ -954,18 +1090,31 @@ class Environment(BaseModel, ABC):
 
     async def _run_tasks(self, tasks: Sequence[Task]) -> List[Optional[TrajectoryResult]]:
         semaphore = asyncio.Semaphore(self.max_parallel_rollouts)
+        completed = 0
 
         async def _run(task: Task) -> Optional[TrajectoryResult]:
+            nonlocal completed
+            status = "failed"
             async with semaphore:
                 try:
                     result = await self.run_task(task)
                     self.stats.record(result)
+                    status = "completed" if result.success else "failed"
                     return result
                 except asyncio.CancelledError:
                     raise
                 except Exception as exc:
                     logger.exception("Task %s failed: %s", task.id, exc)
                     return None
+                finally:
+                    completed += 1
+                    logger.info(
+                        "Progress %s/%s | task=%s | status=%s",
+                        completed,
+                        len(tasks),
+                        task.id,
+                        status,
+                    )
 
         return list(await asyncio.gather(*[_run(task) for task in tasks]))
 
@@ -1199,19 +1348,7 @@ class Environment(BaseModel, ABC):
                 except Exception as e:
                     logging.getLogger("gymkhana.envs").error(f"Error recording sandbox session: {e}")
 
-            # Insert ShareGPT dataset if enabled (only for successful rollouts with correct answers)
-            # For tasks with expected answers: skip if answer_correct=False
-            # For tasks without expected answers (e.g., SWE): use reward threshold
-            should_export_sharegpt = False
-            if self.config.dataset.output_sharegpt and result.success and result.final_answer:
-                expected_answer = self.get_expected_answer(task)
-                if expected_answer is not None:
-                    # Task has expected answer - check correctness
-                    should_export_sharegpt = result.answer_correct is not False
-                else:
-                    # Task has no expected answer (e.g., SWE) - use reward threshold
-                    # Export if total_reward > 0.5 (indicates good quality trajectory)
-                    should_export_sharegpt = result.total_reward > 0.5
+            should_export_sharegpt = self.should_export_sharegpt(result, task)
 
             logger.info(f"ShareGPT export decision for task {task.id}: should_export={should_export_sharegpt}, "
                        f"output_sharegpt={self.config.dataset.output_sharegpt}, success={result.success}, "
@@ -1223,19 +1360,27 @@ class Environment(BaseModel, ABC):
                 # Only insert if we have meaningful content
                 if conversations and len(conversations) > 1:  # More than just system prompt
                     logger.info(f"Inserting ShareGPT dataset for task {task.id} with {len(conversations)} messages")
+                    export_metadata = {
+                        "env": self.name,
+                        "success": result.success,
+                        "final_answer": result.final_answer,
+                        "num_code_blocks": result.num_code_blocks,
+                    }
+                    export_metadata.update(
+                        self.build_sharegpt_metadata(result, task)
+                    )
                     await self.data_inserter.insert_sharegpt_dataset(
                         task_id=task.id,
                         conversations=conversations,
-                        metadata={
-                            "env": self.name,
-                            "success": result.success,
-                            "final_answer": result.final_answer,
-                            "num_code_blocks": result.num_code_blocks
-                        }
+                        metadata=export_metadata,
                     )
                     logger.info(f"Successfully inserted ShareGPT dataset for task {task.id}")
                 else:
-                    logger.warning(f"Skipping ShareGPT insertion for task {task.id}: valid={valid_conversation}, num_messages={len(conversations)}")
+                    logger.warning(
+                        "Skipping ShareGPT insertion for task %s: builder returned "
+                        "no valid conversation",
+                        task.id,
+                    )
 
         # Bulk persist results (skip when num_rollouts > 1: multi-rollout already persisted all G in _run_multi_rollout_task)
         if self.data_inserter and self.num_rollouts == 1:
@@ -1246,12 +1391,17 @@ class Environment(BaseModel, ABC):
             if persist_coros:
                 await asyncio.gather(*persist_coros)
 
+        artifacts, accepted, rejected = self._write_local_artifacts(tasks, results)
+
         summary = EnvironmentRunSummary(
             environment=self.name,
             total_tasks=len(tasks),
             successful=sum(1 for r in valid_results if r.success),
             failed=sum(1 for r in valid_results if not r.success),
             num_errors=sum(1 for r in valid_results if not r.success),
+            accepted=accepted,
+            rejected=rejected,
+            artifacts=artifacts,
             stats=self.stats,
             results=valid_results,
         )

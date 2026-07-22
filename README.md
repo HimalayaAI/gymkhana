@@ -49,6 +49,7 @@ than provider SDKs.
 | Environment | Task family |
 | --- | --- |
 | `romanized-nepali` | Bidirectional Nepali Devanagari/romanized transliteration |
+| `english-sharegpt-to-nepali` | Full-conversation English ShareGPT to Nepali ShareGPT translation |
 | `ifeval` | Verifiable instruction-following constraints |
 | `math-python` | Mathematical problem solving with a Python sandbox |
 | `hotpotqa` | Multi-hop question answering |
@@ -153,6 +154,53 @@ references are best treated as bootstrap labels. Production datasets should
 prefer reviewed references or an explicitly documented variant-aware verifier.
 Original acknowledgments, license, and third-party notices are retained under
 `gymkhana/envs/romanized_nepali/`.
+
+## English ShareGPT to Nepali
+
+`english-sharegpt-to-nepali` translates complete ShareGPT conversations into
+natural Nepali Devanagari and exports the translated conversation rather than
+the translation instruction. It accepts ShareGPT `conversations`, OpenAI-style
+`messages`, and flattened Hermes `instruction`/`response` rows from local
+JSON/JSONL files or Hugging Face datasets.
+
+The reward checks strict JSON, exact turn-role structure, non-empty messages,
+Devanagari use, preservation of code/math/URLs/tags/numbers, and semantic
+translation fidelity. Reference-free rows must pass a configurable LLM judge;
+a reviewed Nepali reference can be used instead. Both paths fail closed below
+the export threshold, and native-speaker review is still required.
+
+Translate a bounded local Hermes file:
+
+```bash
+python -m gymkhana.run \
+  --env english-sharegpt-to-nepali \
+  --dataset-name /path/to/openhermes.jsonl \
+  --model openai:gpt-4.1-mini \
+  --judge-model openai:gpt-4.1-mini \
+  --client openai \
+  --limit 100 \
+  --num-rollouts 4
+```
+
+Run the checked-in OpenHermes configuration through the same standard runner:
+
+```bash
+python -m gymkhana.run \
+  --config configs/english_sharegpt_to_nepali/openhermes.yaml \
+  --no-database
+```
+
+The runner writes accepted JSONL, a full audit JSONL, a summary, and `run.log`
+under the configured `output_dir`; PostgreSQL and helper scripts are optional.
+Use `--dataset-offset` and `--limit` for bounded windows. Compatible ShareGPT,
+OpenAI-message, and flattened Hermes datasets can be onboarded with YAML alone;
+see the environment README for backend and schema details.
+
+For OpenHermes or another mixed-source corpus, keep every row's provenance and
+verify the license and attribution obligations of each retained source. No
+third-party dataset rows are bundled with this environment. The full loader and
+reward contract are documented in
+`gymkhana/envs/english_sharegpt_nepali/README.md`.
 
 ## Contributing a new environment
 

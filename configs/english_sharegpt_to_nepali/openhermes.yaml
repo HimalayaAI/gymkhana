@@ -1,0 +1,16 @@
+# OpenHermes 2.5 -> Nepali ShareGPT preview/production configuration.
+# Model settings inherit the environment defaults and can be overridden by CLI.
+name: english-sharegpt-to-nepali
+
+dataset:
+  dataset_name: openhermes-2.5
+  dataset_backend: auto
+  dataset_split: train
+  dataset_offset: 0
+  limit: 100
+  batch_size: 4
+  num_rollouts: 1
+  output_dir: outputs/english_sharegpt_to_nepali/openhermes
+  output_basename: openhermes_nepali
+  output_sharegpt: true
+  output_audit_jsonl: true

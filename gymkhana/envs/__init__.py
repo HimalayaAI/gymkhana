@@ -20,6 +20,7 @@ from .swe import SWEEnv  # noqa: F401
 from .ifeval import IfEvalEnv  # noqa: F401
 from .tool_use_singleturn.tool_use_singleturn import ToolUseSingleTurnEnv  # noqa: F401
 from .romanized_nepali import RomanizedNepaliEnv  # noqa: F401
+from .english_sharegpt_nepali import EnglishShareGPTToNepaliEnv  # noqa: F401
 
 __all__ = [
     "ENVIRONMENTS",
@@ -35,4 +36,5 @@ __all__ = [
     "OolongEnv",
     "HotpotQAEnv",
     "RomanizedNepaliEnv",
+    "EnglishShareGPTToNepaliEnv",
 ]

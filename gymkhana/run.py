@@ -2,15 +2,68 @@
 
 import asyncio
 import argparse
+import logging
 from pathlib import Path
+from typing import Any, Mapping, Optional
 
 from dotenv import load_dotenv
+from pydantic import BaseModel
+import yaml
 load_dotenv()
 
 from gymkhana.envs import get_environment
 from gymkhana.envs.config import EnvConfig, InferenceConfig, LLMClientType
 from gymkhana.core.services import ServiceContainer
 from gymkhana.core.services.sandboxes import REPLSandbox
+
+
+def _apply_config_overrides(
+    model: BaseModel,
+    overrides: Mapping[str, Any],
+    *,
+    prefix: str = "",
+) -> None:
+    """Apply a partial YAML mapping to a validated Pydantic config tree."""
+    for key, value in overrides.items():
+        field_name = f"{prefix}.{key}" if prefix else key
+        if key not in type(model).model_fields:
+            raise ValueError(f"unknown configuration field: {field_name}")
+        current = getattr(model, key)
+        if isinstance(current, BaseModel) and isinstance(value, Mapping):
+            _apply_config_overrides(current, value, prefix=field_name)
+        elif isinstance(current, dict) and isinstance(value, Mapping):
+            merged = dict(current)
+            merged.update(value)
+            setattr(model, key, merged)
+        else:
+            setattr(model, key, value)
+
+
+def load_environment_config(
+    config_path: Optional[Path] = None,
+    *,
+    environment_override: Optional[str] = None,
+) -> tuple[str, EnvConfig]:
+    """Load an environment's defaults and overlay a partial YAML config."""
+    overrides: dict[str, Any] = {}
+    if config_path is not None:
+        with config_path.expanduser().open("r", encoding="utf-8") as handle:
+            payload = yaml.safe_load(handle) or {}
+        if not isinstance(payload, dict):
+            raise ValueError(f"config must contain a YAML mapping: {config_path}")
+        overrides = payload
+
+    env_name = environment_override or overrides.get("name") or "math-python"
+    env_cls = get_environment(env_name)
+    if not hasattr(env_cls, "default_config") or env_cls.default_config is None:
+        raise ValueError(
+            f"environment {env_name!r} does not expose a default_config"
+        )
+    config = env_cls.default_config.model_copy(deep=True)
+    _apply_config_overrides(config, overrides)
+    if environment_override is not None:
+        config.name = environment_override
+    return env_name, config
 
 
 def main():
@@ -21,18 +74,63 @@ def main():
     parser.add_argument(
         "--config",
         default=None,
-        help="Config YAML file (e.g., configs/default_config.yaml)"
+        help=(
+            "Partial YAML config (e.g., "
+            "configs/english_sharegpt_to_nepali/openhermes.yaml)"
+        ),
     )
     parser.add_argument(
         "--env",
-        choices=["math-python", "oolong", "code", "hotpotqa", "swe", "ifeval", "tool-use-singleturn", "romanized-nepali"],
+        choices=[
+            "math-python",
+            "oolong",
+            "code",
+            "hotpotqa",
+            "swe",
+            "ifeval",
+            "tool-use-singleturn",
+            "romanized-nepali",
+            "english-sharegpt-to-nepali",
+        ],
         default=None,
         help="Task environment (overrides config)"
+    )
+    parser.add_argument(
+        "--dataset-name",
+        default=None,
+        help="Hugging Face dataset name or local JSON/JSONL path (overrides config)",
+    )
+    parser.add_argument(
+        "--dataset-config",
+        default=None,
+        help="Optional Hugging Face dataset configuration (overrides config)",
+    )
+    parser.add_argument(
+        "--dataset-split",
+        default=None,
+        help="Dataset split (overrides config)",
+    )
+    parser.add_argument(
+        "--dataset-backend",
+        choices=["auto", "local", "huggingface", "huggingface-rows"],
+        default=None,
+        help="Dataset loader backend (overrides config)",
+    )
+    parser.add_argument(
+        "--dataset-offset",
+        type=int,
+        default=None,
+        help="Number of source rows to skip before applying --limit",
     )
     parser.add_argument(
         "--model",
         default=None,
         help="Main model (overrides config)"
+    )
+    parser.add_argument(
+        "--judge-model",
+        default=None,
+        help="Semantic judge model (overrides config)",
     )
     parser.add_argument(
         "--client",
@@ -61,6 +159,25 @@ def main():
         "--output-dir",
         default=None,
         help="Output directory (overrides config)"
+    )
+    parser.add_argument(
+        "--output-basename",
+        default=None,
+        help="Basename for JSONL and summary artifacts (overrides config)",
+    )
+    parser.add_argument(
+        "--log-file",
+        default=None,
+        help="Log file path (defaults to OUTPUT_DIR/run.log)",
+    )
+    parser.add_argument(
+        "--database",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help=(
+            "Enable or disable PostgreSQL persistence; defaults to enabled when "
+            "DB_* variables are configured"
+        ),
     )
     parser.add_argument(
         "--mask-observations",
@@ -99,17 +216,12 @@ def main():
 
     args = parser.parse_args()
 
-    # Get environment and its default config
-    env_name = args.env or "math-python"
+    # Load environment defaults, then overlay YAML before applying CLI flags.
+    env_name, config = load_environment_config(
+        Path(args.config) if args.config else None,
+        environment_override=args.env,
+    )
     env_cls = get_environment(env_name)
-
-    # Get default config - handle both class attribute and lazy loading
-    if hasattr(env_cls, 'default_config') and env_cls.default_config is not None:
-        config = env_cls.default_config.model_copy(deep=True)
-    else:
-        # For environments with lazy config loading, instantiate to get config
-        temp_env = env_cls()
-        config = temp_env.config.model_copy(deep=True)
 
     # Apply CLI overrides
     client_map = {
@@ -128,9 +240,25 @@ def main():
         config.llm.model = args.model
     if args.client and config.llm is not None:
         config.llm.client = client_map[args.client]
+    if args.judge_model:
+        if config.llm_judge is None:
+            raise ValueError(
+                "--judge-model requires an environment with LLM judge settings"
+            )
+        config.llm_judge.model = args.judge_model
 
-    if args.limit:
+    if args.limit is not None:
         config.dataset.limit = args.limit
+    if args.dataset_name:
+        config.dataset.dataset_name = args.dataset_name
+    if args.dataset_config:
+        config.dataset.dataset_config = args.dataset_config
+    if args.dataset_split:
+        config.dataset.dataset_split = args.dataset_split
+    if args.dataset_backend:
+        config.dataset.dataset_backend = args.dataset_backend
+    if args.dataset_offset is not None:
+        config.dataset.dataset_offset = args.dataset_offset
     if args.max_turns:
         # Only set if RLM mode
         if hasattr(config, 'repl'):
@@ -140,6 +268,8 @@ def main():
             config.repl.server_url = args.server_url
     if args.output_dir:
         config.dataset.output_dir = args.output_dir
+    if args.output_basename:
+        config.dataset.output_basename = args.output_basename
     if args.mask_observations:
         config.dataset.mask_observations = True
     if args.num_rollouts is not None:
@@ -155,6 +285,21 @@ def main():
         if isinstance(mode_config, RLMModeSettings):
             mode_config.enable_correction_feedback = True
 
+    output_dir = Path(config.dataset.output_dir).expanduser()
+    output_dir.mkdir(parents=True, exist_ok=True)
+    log_path = (
+        Path(args.log_file).expanduser()
+        if args.log_file
+        else output_dir / "run.log"
+    )
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    logging.basicConfig(
+        level=logging.DEBUG if config.debug else logging.INFO,
+        format="%(asctime)s %(levelname)s %(name)s %(message)s",
+        handlers=[logging.StreamHandler(), logging.FileHandler(log_path)],
+        force=True,
+    )
+
     # Get LLM config for display
     llm_config = config.get_llm_config()
 
@@ -167,6 +312,8 @@ def main():
     model_identifier = getattr(llm_config, "model_identifier", llm_config.model)
     client_name = getattr(llm_config.client, "value", str(llm_config.client))
     print(f"Model:        {model_identifier} ({client_name})")
+    if config.llm_judge:
+        print(f"Judge model:  {config.llm_judge.model}")
     print(f"Mode:         {config.interaction_mode.value}")
 
     # Display mode-specific settings
@@ -183,10 +330,14 @@ def main():
     # Display common features (apply to all modes)
     print(f"Reasoning:    {'enabled' if config.enable_reasoning else 'disabled'} (<think> blocks)")
 
-    print(f"Limit:        {config.dataset.limit or 'all'}")
+    limit_label = (
+        config.dataset.limit if config.dataset.limit is not None else "all"
+    )
+    print(f"Limit:        {limit_label}")
     print(f"Batch size:   {args.batch_size or config.dataset.batch_size} (max concurrent tasks)")
     print(f"Num rollouts: {getattr(config.dataset, 'num_rollouts', 1)} (per task)")
     print(f"Output:       {config.dataset.output_dir}")
+    print(f"Log:          {log_path}")
     print("=" * 60)
 
     # Initialize Database if configured
@@ -195,16 +346,23 @@ def main():
         import os
         from gymkhana.core.services.storage.env_storage import EnvStorageService
 
-        # Map env vars to database service fields
-        db_args = {}
-        if os.getenv("DB_NAME"): db_args["db_name"] = os.getenv("DB_NAME")
-        if os.getenv("DB_USER"): db_args["user"] = os.getenv("DB_USER")
-        if os.getenv("DB_PASSWORD"): db_args["password"] = os.getenv("DB_PASSWORD")
-        if os.getenv("DB_HOST"): db_args["host"] = os.getenv("DB_HOST")
-        if os.getenv("DB_PORT"): db_args["port"] = int(os.getenv("DB_PORT", 5432))
+        db_is_configured = any(
+            os.getenv(name)
+            for name in ("DB_NAME", "DB_USER", "DB_PASSWORD", "DB_HOST", "DB_PORT")
+        )
+        if args.database is False or (args.database is None and not db_is_configured):
+            print("Database insertion: DISABLED")
+        else:
+            # Map env vars to database service fields
+            db_args = {}
+            if os.getenv("DB_NAME"): db_args["db_name"] = os.getenv("DB_NAME")
+            if os.getenv("DB_USER"): db_args["user"] = os.getenv("DB_USER")
+            if os.getenv("DB_PASSWORD"): db_args["password"] = os.getenv("DB_PASSWORD")
+            if os.getenv("DB_HOST"): db_args["host"] = os.getenv("DB_HOST")
+            if os.getenv("DB_PORT"): db_args["port"] = int(os.getenv("DB_PORT", 5432))
 
-        data_inserter = EnvStorageService(**db_args)
-        print(f"Database insertion: ENABLED (User: {data_inserter.user}, DB: {data_inserter.db_name})")
+            data_inserter = EnvStorageService(**db_args)
+            print(f"Database insertion: ENABLED (User: {data_inserter.user}, DB: {data_inserter.db_name})")
     except Exception as e:
         print(f"Database insertion: DISABLED ({e})")
 
@@ -242,10 +400,12 @@ def main():
             max_parallel_rollouts=args.batch_size or config.dataset.batch_size,
             num_rollouts=getattr(config.dataset, "num_rollouts", 1),
         )
-        await env.setup()
         try:
-            await env.run(limit=config.dataset.limit)
+            summary = await env.run(limit=config.dataset.limit)
+            for artifact_name, artifact_path in summary.artifacts.items():
+                print(f"Artifact:     {artifact_name}={artifact_path}")
         finally:
+            await env.finalize()
             # Close REPL aiohttp client to avoid "Unclosed client session" warnings
             sandbox = getattr(getattr(env, "services", None), "sandbox", None)
             if sandbox and hasattr(sandbox, "client"):

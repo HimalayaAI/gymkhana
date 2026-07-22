@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from enum import Enum
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -58,6 +58,7 @@ class EnvironmentType(str, Enum):
     SWE = "swe"
     IFEVAL = "ifeval"
     ROMANIZED_NEPALI = "romanized-nepali"
+    ENGLISH_SHAREGPT_TO_NEPALI = "english-sharegpt-to-nepali"
 
 
 class REPLSettings(BaseModel):
@@ -263,6 +264,10 @@ class DatasetSettings(BaseModel):
     dataset_name: Optional[str] = None
     dataset_config: Optional[str] = None
     dataset_split: str = "train"
+    dataset_backend: Literal[
+        "auto", "local", "huggingface", "huggingface-rows"
+    ] = "auto"
+    dataset_offset: int = Field(default=0, ge=0)
     dataset_seed: Optional[int] = None
     field_mapping: Dict[str, Optional[str]] = Field(
         default_factory=lambda: {
@@ -281,7 +286,9 @@ class DatasetSettings(BaseModel):
     limit: Optional[int] = None
     include_instructions: bool = True
     output_dir: str = "outputs/gymkhana"
+    output_basename: str = "sharegpt"
     output_sharegpt: bool = True
+    output_audit_jsonl: bool = True
     mask_observations: bool = False
     enable_rewards: bool = True
     reward_function: str = "simple"
