@@ -91,6 +91,9 @@ def main():
             "tool-use-singleturn",
             "romanized-nepali",
             "english-sharegpt-to-nepali",
+	    "hotpotqa",
+            "faithfulness-judge",
+            "swe",
         ],
         default=None,
         help="Task environment (overrides config)"

@@ -56,6 +56,8 @@ than provider SDKs.
 | `oolong` | Long-context reasoning |
 | `swe` | Software-engineering tasks in a sandbox |
 | `tool-use-singleturn` | Verifiable single-turn tool use |
+| faithfulness-judge | Context/answer faithfulness judging (Self-RAG) |
+
 
 ## Installation
 

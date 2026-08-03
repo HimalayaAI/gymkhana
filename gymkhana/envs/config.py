@@ -59,7 +59,7 @@ class EnvironmentType(str, Enum):
     IFEVAL = "ifeval"
     ROMANIZED_NEPALI = "romanized-nepali"
     ENGLISH_SHAREGPT_TO_NEPALI = "english-sharegpt-to-nepali"
-
+    FAITHFULNESS_JUDGE = "faithfulness-judge"
 
 class REPLSettings(BaseModel):
     """Configuration for the Python REPL sandbox."""
