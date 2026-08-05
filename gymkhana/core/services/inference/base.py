@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, TypeVar
 
 from pydantic import BaseModel, ConfigDict
+
+
+StructuredOutputT = TypeVar("StructuredOutputT", bound=BaseModel)
 
 
 class InferenceService(BaseModel, ABC):
@@ -76,6 +79,28 @@ class InferenceService(BaseModel, ABC):
             **kwargs,
         )
         return response, None
+
+    async def generate_structured(
+        self,
+        *,
+        messages: List[Dict[str, str]],
+        output_type: type[StructuredOutputT],
+        system_prompt: Optional[str] = None,
+        model: Optional[str] = None,
+        temperature: Optional[float] = None,
+        max_tokens: Optional[int] = None,
+        **kwargs: Any,
+    ) -> StructuredOutputT:
+        """Generate provider-validated structured output.
+
+        Inference backends that support native structured output should override
+        this method. Keeping this separate from :meth:`generate` prevents
+        verifiers from parsing provider text or accepting unvalidated payloads.
+        """
+
+        raise NotImplementedError(
+            f"{type(self).__name__} does not support structured generation"
+        )
 
     @abstractmethod
     async def batch_generate(

@@ -134,6 +134,50 @@ for candidate in group.candidates:
 Candidates retain their task ID, rollout-group ID, and ordered sample index so
 rewards and exports can be compared within the correct group.
 
+## Built-in RAG verifiers
+
+`gymkhana.verifiers.rag` provides reusable external metrics for retrieval
+environments. The first built-ins are:
+
+- `FaithfulnessVerifier`: fraction of atomic answer claims supported by the
+  retrieved contexts.
+- `GroundednessVerifier`: lower-cost holistic support rating mapped to
+  `0.0`, `0.5`, or `1.0`.
+- `ResponseRelevanceVerifier`: whether the answer directly addresses the
+  question.
+- `ContextRelevanceVerifier`: fraction of retrieved contexts useful for the
+  question.
+- `ContextPrecisionVerifier`: average precision that rewards relevant contexts
+  appearing earlier in retrieval order.
+
+The external judge returns only typed claim/context verdicts. Gymkhana computes
+the normalized metric in trusted code; the answer policy never supplies its own
+reward. These reference-free metrics are inspired by common RAG evaluation
+practice, including RAGAS, while using Gymkhana's provider-neutral Pydantic AI
+inference layer.
+
+```python
+from gymkhana.envs.config import LLMJudgeSettings
+from gymkhana.verifiers.rag import FaithfulnessVerifier, RAGSample
+
+verifier = FaithfulnessVerifier(
+    settings=LLMJudgeSettings(model="openai:gpt-4.1-mini"),
+    inference_service=env._inference_service,
+)
+result = await verifier.verify(
+    RAGSample(
+        question=task.prompt,
+        answer=trajectory.final_answer,
+        contexts=task.metadata["retrieved_contexts"],
+    )
+)
+reward = result.score
+```
+
+See [`gymkhana/verifiers/rag/README.md`](gymkhana/verifiers/rag/README.md) for
+the metric contracts, formulas, failure behavior, and environment integration
+guidance.
+
 ## Romanized Nepali: LLM policy, deterministic verifier
 
 `romanized-nepali` adapts the bidirectional translator contributed in
