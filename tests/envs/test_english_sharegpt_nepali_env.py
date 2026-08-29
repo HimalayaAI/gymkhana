@@ -518,9 +518,9 @@ async def test_standard_run_writes_local_dataset_and_audit_without_storage(
     dataset_path = tmp_path / "openhermes_preview.jsonl"
     audit_path = tmp_path / "openhermes_preview_audit.jsonl"
     summary_path = tmp_path / "openhermes_preview_summary.json"
-    dataset_rows = [json.loads(line) for line in dataset_path.read_text().splitlines()]
-    audit_rows = [json.loads(line) for line in audit_path.read_text().splitlines()]
-    saved_summary = json.loads(summary_path.read_text())
+    dataset_rows = [json.loads(line) for line in dataset_path.read_text(encoding="utf-8").splitlines()]
+    audit_rows = [json.loads(line) for line in audit_path.read_text(encoding="utf-8").splitlines()]
+    saved_summary = json.loads(summary_path.read_text(encoding="utf-8"))
 
     assert dataset_rows[0]["conversations"] == NEPALI
     assert dataset_rows[0]["source_provenance"]["source"] == "OpenHermes"
