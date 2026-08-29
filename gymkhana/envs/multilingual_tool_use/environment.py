@@ -97,6 +97,15 @@ class MultilingualToolUseConfig(EnvConfig):
 
     localizer_llm: InferenceConfig = Field(default_factory=InferenceConfig)
     localization: LocalizationSettings = Field(default_factory=LocalizationSettings)
+    policy_reasoning: Literal["english", "target", "hybrid"] = Field(
+        default="english",
+        description=(
+            "Language the policy is asked to reason in before calling tools. "
+            "english: no instruction (models reason best in English; tool values stay "
+            "verbatim). target: reason in the target language. hybrid: target language "
+            "with English kept for tool names, argument values, and technical terms."
+        ),
+    )
     source_format: Literal["xlam", "hermes"] = Field(
         default="xlam",
         description=(
@@ -351,6 +360,21 @@ class MultilingualToolUseEnv(ToolUseSingleTurnEnv):
     # ------------------------------------------------------------------
     # Behaviour hooks
     # ------------------------------------------------------------------
+    def _reasoning_instruction(self) -> Optional[str]:
+        spec = self.language_spec
+        mode = self.ml_config.policy_reasoning
+        if mode == "target":
+            return (
+                f"Think through the request in {spec.name} before calling tools. Keep tool "
+                "names, argument values, and technical identifiers exactly as written."
+            )
+        if mode == "hybrid":
+            return (
+                f"Think through the request in {spec.name}, keeping English for tool names, "
+                "argument values, and technical terms so they stay exact."
+            )
+        return None
+
     def build_system_prompt(self, task: Task) -> str:
         spec = self.language_spec
         parts = [
@@ -362,6 +386,9 @@ class MultilingualToolUseEnv(ToolUseSingleTurnEnv):
                 "request verbatim; never translate or transliterate them."
             ),
         ]
+        reasoning_instruction = self._reasoning_instruction()
+        if reasoning_instruction:
+            parts.append(reasoning_instruction)
         env_instructions = self.get_environment_instructions(task)
         if env_instructions:
             parts.append(env_instructions.strip())

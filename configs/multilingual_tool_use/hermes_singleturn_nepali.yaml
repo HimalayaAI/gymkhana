@@ -3,6 +3,10 @@
 # stay English; reward is exact tool-call match. Reasoning is captured as <think>.
 name: multilingual-tool-use
 source_format: hermes
+# english (default): models reason best in English and tool values stay verbatim.
+# target | hybrid: ask the policy to think in Nepali (hybrid keeps English for
+# tool names / values). Reasoning is captured from the provider and exported as <think>.
+policy_reasoning: english
 
 llm:
   model: litellm:openai/gpt-5.6-luna-pro

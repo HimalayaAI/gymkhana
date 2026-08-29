@@ -294,3 +294,18 @@ def test_localizer_prompt_asks_for_spoken_requests() -> None:
     assert "Siri or Alexa" in prompt
     assert "not a word-for-word translation" in prompt
     assert "never as key=value pairs" in prompt
+
+
+@pytest.mark.parametrize(
+    ("mode", "expected_fragment"),
+    [("english", None), ("target", "Think through the request in Nepali (Devanagari)"), ("hybrid", "keeping English for tool names")],
+)
+def test_policy_reasoning_mode_controls_system_prompt(mode: str, expected_fragment: Optional[str]) -> None:
+    env = make_env(ScriptedInference(responses=[]))
+    env.config.policy_reasoning = mode
+    prompt = env.build_system_prompt(make_task())
+    if expected_fragment is None:
+        assert "Think through" not in prompt
+    else:
+        assert expected_fragment in prompt
+    assert "verbatim" in prompt
