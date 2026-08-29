@@ -4,7 +4,7 @@ import asyncio
 import argparse
 import logging
 from pathlib import Path
-from typing import Any, Mapping, Optional
+from typing import Any, Dict, Mapping, Optional
 
 from dotenv import load_dotenv
 from pydantic import BaseModel
@@ -17,26 +17,37 @@ from gymkhana.core.services import ServiceContainer
 from gymkhana.core.services.sandboxes import REPLSandbox
 
 
-def _apply_config_overrides(
+def _merge_config_overrides(
     model: BaseModel,
     overrides: Mapping[str, Any],
     *,
     prefix: str = "",
-) -> None:
-    """Apply a partial YAML mapping to a validated Pydantic config tree."""
+) -> Dict[str, Any]:
+    """Merge a partial YAML mapping over a config tree, returning a plain dict.
+
+    Nested models recurse, dict fields merge key-wise, everything else is replaced.
+    The caller re-validates the whole model once, so cross-field rules (for
+    example ``generation.target_language`` referring to ``generation.languages``)
+    see the final state regardless of YAML key order.
+    """
+    merged: Dict[str, Any] = model.model_dump()
     for key, value in overrides.items():
         field_name = f"{prefix}.{key}" if prefix else key
         if key not in type(model).model_fields:
             raise ValueError(f"unknown configuration field: {field_name}")
         current = getattr(model, key)
         if isinstance(current, BaseModel) and isinstance(value, Mapping):
-            _apply_config_overrides(current, value, prefix=field_name)
+            merged[key] = _merge_config_overrides(current, value, prefix=field_name)
         elif isinstance(current, dict) and isinstance(value, Mapping):
-            merged = dict(current)
-            merged.update(value)
-            setattr(model, key, merged)
+            merged[key] = {**current, **value}
         else:
-            setattr(model, key, value)
+            merged[key] = value
+    return merged
+
+
+def _apply_config_overrides(model: BaseModel, overrides: Mapping[str, Any]) -> BaseModel:
+    """Apply a partial YAML mapping to a validated Pydantic config tree."""
+    return type(model).model_validate(_merge_config_overrides(model, overrides))
 
 
 def load_environment_config(
@@ -59,8 +70,7 @@ def load_environment_config(
         raise ValueError(
             f"environment {env_name!r} does not expose a default_config"
         )
-    config = env_cls.default_config.model_copy(deep=True)
-    _apply_config_overrides(config, overrides)
+    config = _apply_config_overrides(env_cls.default_config, overrides)
     if environment_override is not None:
         config.name = environment_override
     return env_name, config

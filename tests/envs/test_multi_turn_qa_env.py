@@ -690,3 +690,27 @@ def test_language_key_must_match_spec_code(tmp_path: Path) -> None:
         config.generation.languages = {
             "hi": LanguageSpec(code="hi-Deva", name="Hindi", instruction="x")
         }
+
+
+def test_yaml_can_declare_target_language_before_languages(tmp_path: Path) -> None:
+    """Loader validates once, so YAML key order must not matter for cross-field rules."""
+    config_path = tmp_path / "maithili.yaml"
+    config_path.write_text(
+        "\n".join(
+            [
+                "name: multi-turn-qa",
+                "generation:",
+                "  target_language: mai-Deva",
+                "  languages:",
+                "    mai-Deva:",
+                "      code: mai-Deva",
+                "      name: Maithili (Devanagari)",
+                "      instruction: Write natural Maithili in Devanagari.",
+                '      script_regex: "[\\u0900-\\u097f]"',
+            ]
+        ),
+        encoding="utf-8",
+    )
+    _, config = load_environment_config(config_path)
+    assert config.generation.language_spec.name == "Maithili (Devanagari)"
+    assert QAVerifier(settings=config.generation).language_issues("ई उत्तर मैथिली मे अछि।") == []
