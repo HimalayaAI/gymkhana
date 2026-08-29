@@ -132,13 +132,20 @@ def flatten(row: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def merge(paths: Iterable[Path]) -> List[Dict[str, Any]]:
-    rows: Dict[str, Dict[str, Any]] = {}
+    """Merge exports, keeping the first row per (id, target_language).
+
+    The same source row localized into two scripts is two distinct examples, so
+    ``target_language`` is part of the key — deduping on ``id`` alone would drop
+    every variant after the first.
+    """
+    rows: Dict[tuple, Dict[str, Any]] = {}
     for path in paths:
         with path.open("r", encoding="utf-8") as handle:
             for line in handle:
                 if line.strip():
                     row = flatten(json.loads(line))
-                    rows.setdefault(str(row["id"]), row)  # first occurrence wins
+                    key = (str(row["id"]), row.get("target_language"))
+                    rows.setdefault(key, row)
     return list(rows.values())
 
 
