@@ -1,0 +1,36 @@
+# Copy this file when onboarding a text dataset for another QA domain.
+name: multi-turn-qa
+
+dataset:
+  dataset_name: organization/domain-corpus
+  dataset_backend: huggingface
+  dataset_split: train
+  limit: 100
+  batch_size: 4
+  output_dir: outputs/multi_turn_qa/domain
+  output_basename: domain_qa
+  field_mapping:
+    id: id
+    text: text
+    source: source
+    subject: category
+    grade: null
+    title: title
+    language: language
+    license: license
+    jurisdiction: jurisdiction
+    document_date: published_at
+    pdf: null
+
+generation:
+  # Supported: general, textbook, legal, health, finance, agriculture,
+  # ecommerce, banking.
+  profile: general
+  subcategory: auto
+  turns: 3
+  target_language: ne-Deva
+  source_language: null
+  source_license: null
+  source_kind: text
+  context_policy: auto
+  acceptance_threshold: 0.75

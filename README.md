@@ -48,6 +48,7 @@ than provider SDKs.
 
 | Environment | Task family |
 | --- | --- |
+| `multi-turn-qa` | Two-agent single/multi-turn textbook and domain QA generation |
 | `romanized-nepali` | Bidirectional Nepali Devanagari/romanized transliteration |
 | `english-sharegpt-to-nepali` | Full-conversation English ShareGPT to Nepali ShareGPT translation |
 | `ifeval` | Verifiable instruction-following constraints |
@@ -245,6 +246,34 @@ verify the license and attribution obligations of each retained source. No
 third-party dataset rows are bundled with this environment. The full loader and
 reward contract are documented in
 `gymkhana/envs/english_sharegpt_nepali/README.md`.
+
+## Multi-turn QA generation
+
+`multi-turn-qa` generates single- or multi-turn conversations with separate
+questioner and answer agents. The questioner and verifier may inspect the
+private source, while the answer agent sees exactly the visible conversation
+that is exported. Built-in profiles cover textbook, legal, health, finance,
+agriculture, ecommerce, banking, and general-domain QA.
+
+Run the checked-in Nepali textbook or legal-PDF configurations:
+
+```bash
+python -m gymkhana.run \
+  --config configs/multi_turn_qa/nepali_textbooks.yaml \
+  --limit 100 \
+  --no-database
+
+python -m gymkhana.run \
+  --config configs/multi_turn_qa/nepali_legal_pdf.yaml \
+  --limit 100 \
+  --no-database
+```
+
+Use `--qa-turns 1` for single-turn output or choose `en`, `ne-Deva`, or
+`ne-Latn` with `--target-language`; other languages are declared as
+`LanguageSpec` entries under `generation.languages` (see the env README). Dataset mappings, context policies,
+verifier routing, profile extension, and PDF chunk provenance are documented in
+`gymkhana/envs/multi_turn_qa/README.md`.
 
 ## Contributing a new environment
 

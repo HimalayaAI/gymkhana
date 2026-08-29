@@ -1,0 +1,46 @@
+# Nepali textbook QA: three-turn educational conversations in Devanagari.
+name: multi-turn-qa
+
+dataset:
+  dataset_name: dineshkarki/nepali-textbooks-corpus
+  dataset_backend: huggingface
+  dataset_split: train
+  dataset_offset: 0
+  limit: 100
+  batch_size: 4
+  num_rollouts: 1
+  output_dir: outputs/multi_turn_qa/nepali_textbooks
+  output_basename: nepali_textbooks_qa
+  output_sharegpt: true
+  output_audit_jsonl: true
+  field_mapping:
+    id: id
+    text: text
+    source: source
+    subject: subject
+    grade: grade
+    title: chapter_title
+    language: null
+    license: null
+    jurisdiction: null
+    document_date: null
+    pdf: null
+
+generation:
+  profile: textbook
+  subcategory: auto
+  turns: 3
+  target_language: ne-Deva
+  source_language: ne
+  source_license: apache-2.0
+  source_kind: text
+  context_policy: auto
+  difficulty_profile: [recall, application, analysis]
+  subjects: []
+  grades: []
+  context_mix:
+    closed_book: 0.35
+    inline_excerpt: 0.35
+    self_contained_problem: 0.30
+  skip_frontmatter: true
+  acceptance_threshold: 0.75
