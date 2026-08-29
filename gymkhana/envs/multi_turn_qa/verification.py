@@ -171,7 +171,7 @@ class QAVerifier:
     def _deterministic_score(
         self, plan: QATurnPlan, answer: str
     ) -> tuple[float, dict[str, Any]]:
-        expected = normalize_text(plan.expected_answer)
+        expected = normalize_text(plan.reference_answer)
         candidate = normalize_text(answer)
         if plan.verifier == VerifierType.MULTIPLE_CHOICE and len(expected) <= 2:
             # Short option label: the first label the candidate mentions is its answer,
@@ -185,7 +185,7 @@ class QAVerifier:
             )
             return float(passed), {"normalized_expected": expected}
         if plan.verifier == VerifierType.NUMERIC:
-            expected_numbers = self._numbers(plan.expected_answer)
+            expected_numbers = self._numbers(plan.reference_answer)
             candidate_numbers = self._numbers(answer)
             # The candidate's final number is treated as its answer; earlier numbers
             # are working. The reference is canonical, so any of its numbers may match.
@@ -245,7 +245,7 @@ class QAVerifier:
                 judge = await LLMJudge(self.judge_settings).score(
                     prompt=plan.question,
                     response=answer,
-                    reference=plan.expected_answer,
+                    reference=plan.reference_answer or "(no reference answer provided - verify against visible context and evidence)",
                     inference_service=self.inference_service,
                     extra_context={
                         "profile": profile.name,

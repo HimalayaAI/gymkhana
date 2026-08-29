@@ -64,7 +64,7 @@ SOURCE = (
 def question_draft(
     *,
     question: str,
-    expected_answer: str,
+    reference_answer: str,
     subcategory: str,
     visible_context: str = "",
     evidence: Optional[List[str]] = None,
@@ -76,7 +76,7 @@ def question_draft(
         {
             "question": question,
             "visible_context": visible_context,
-            "expected_answer": expected_answer,
+            "reference_answer": reference_answer,
             "answer_type": answer_type,
             "verifier": verifier,
             "evidence": evidence or [],
@@ -316,7 +316,7 @@ async def test_two_agent_multiturn_run_exports_only_visible_context(tmp_path: Pa
     responses = [
         question_draft(
             question="यस नियमावलीको नाम के हो?",
-            expected_answer="यसको नाम परीक्षण नियमावली हो।",
+            reference_answer="यसको नाम परीक्षण नियमावली हो।",
             subcategory="definitions",
             visible_context=excerpt,
             evidence=[excerpt],
@@ -325,7 +325,7 @@ async def test_two_agent_multiturn_run_exports_only_visible_context(tmp_path: Pa
         JUDGE_PASS,
         question_draft(
             question="अघिल्लो उत्तरमा उल्लेख भएको नाम कुन नियममा दिइएको छ?",
-            expected_answer="नियम १ मा।",
+            reference_answer="नियम १ मा।",
             subcategory="definitions",
             standalone=False,
         ),
@@ -407,7 +407,7 @@ async def test_source_grounded_profile_forces_judge_and_grounding_gate(
     responses = [
         question_draft(
             question="नियमअनुसार दस्तुर कति हो?",
-            expected_answer="४२",
+            reference_answer="४२",
             subcategory="definitions",
             visible_context=excerpt,
             evidence=[excerpt],
@@ -440,7 +440,7 @@ async def test_judge_score_is_normalized_before_threshold(tmp_path: Path) -> Non
     responses = [
         question_draft(
             question="यस नियमावलीको नाम के हो?",
-            expected_answer="परीक्षण नियमावली",
+            reference_answer="परीक्षण नियमावली",
             subcategory="conceptual",
             visible_context=excerpt,
             evidence=[excerpt],
@@ -480,7 +480,7 @@ async def test_single_turn_numeric_nepali_uses_deterministic_verifier(
     responses = [
         question_draft(
             question="२१ लाई २ ले गुणा गर्दा कति हुन्छ?",
-            expected_answer="४२",
+            reference_answer="४२",
             subcategory="math_stem",
             answer_type="numeric",
             verifier="numeric",
@@ -516,14 +516,14 @@ async def test_invalid_questioner_output_is_retried(tmp_path: Path) -> None:
     excerpt = "नियम १ अनुसार यस नियमावलीको नाम परीक्षण नियमावली हो।"
     invalid = question_draft(
         question="यस नियमावलीको नाम के हो?",
-        expected_answer="परीक्षण नियमावली",
+        reference_answer="परीक्षण नियमावली",
         subcategory="definitions",
         visible_context=excerpt,
         evidence=[],
     )
     valid = question_draft(
         question="यस नियमावलीको नाम के हो?",
-        expected_answer="परीक्षण नियमावली",
+        reference_answer="परीक्षण नियमावली",
         subcategory="definitions",
         visible_context=excerpt,
         evidence=[excerpt],
@@ -563,7 +563,7 @@ def _plan(verifier: str, expected: str):
     from gymkhana.envs.multi_turn_qa.models import QATurnPlan
 
     return QATurnPlan.model_construct(
-        expected_answer=expected,
+        reference_answer=expected,
         verifier=VerifierType(verifier),
         answer_type=AnswerType(verifier if verifier != "exact" else "exact"),
     )

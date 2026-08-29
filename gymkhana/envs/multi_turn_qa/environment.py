@@ -299,15 +299,18 @@ class MultiTurnQAEnv(Environment):
             ContextPolicy.AUTO: "",
         }[policy]
         answer_guidance = (
-            "Use numeric/exact/multiple_choice verification only when the private expected_answer "
-            "has an objectively checkable final value. Use source_grounded for passage/legal facts "
-            "and rubric for explanatory or interpretive answers. expected_answer must contain only "
-            "the private reference answer, never instructions to the answer agent."
+            "Use numeric/exact/multiple_choice verification only when the private reference_answer "
+            "has an objectively checkable final value; reference_answer is required for these types. "
+            "Use source_grounded for passage/legal facts grounded in evidence spans (reference_answer may be omitted). "
+            "Use rubric for explanatory or interpretive answers, supplying a rubric "
+            "list of grading criteria instead of a reference_answer. reference_answer, when provided, "
+            "must contain only the private reference answer, never instructions to the answer agent."
         )
         schema = {
             "question": "string",
             "visible_context": "string",
-            "expected_answer": "private reference answer string",
+            "reference_answer": "private reference answer string, or null for source_grounded/rubric",
+            "rubric": ["grading criterion string, required for answer_type=rubric, else empty list"],
             "answer_type": [item.value for item in AnswerType],
             "verifier": [item.value for item in VerifierType],
             "evidence": ["short verbatim source span"],
@@ -436,7 +439,8 @@ class MultiTurnQAEnv(Environment):
                         question=draft.question,
                         user_message=user_message,
                         visible_context=draft.visible_context,
-                        expected_answer=draft.expected_answer,
+                        reference_answer=draft.reference_answer,
+                        rubric=draft.rubric,
                         answer_type=draft.answer_type,
                         verifier=draft.verifier,
                         evidence=draft.evidence,
