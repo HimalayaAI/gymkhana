@@ -82,15 +82,20 @@ def test_environment_is_registered() -> None:
 
 
 def test_protected_tokens_and_argument_literals() -> None:
-    assert protected_tokens("mail bob@example.com and open https://x.io/a?b=1 by 5pm") == {
+    assert protected_tokens("mail bob@example.com, and open https://x.io/a?b=1. By 5pm") == {
         "bob@example.com": 1,
         "https://x.io/a?b=1": 1,
     }
     assert protected_tokens(EN_QUERY) == {}  # plain numbers are not censused
     literals = argument_literals(EXPECTED, EN_QUERY)
     assert literals == ["Paris", "2024-05-01", "3"]  # numeric args count, as ASCII digits
-    nested = [{"name": "f", "arguments": {"filters": {"ids": ["ab", "x"], "n": 7, "on": True, "ratio": 2.0}}}]
-    assert argument_literals(nested, "give me ab and x, 7 of them at ratio 2") == ["ab", "7", "2"]
+    nested = [{"name": "f", "arguments": {"filters": {"ids": ["AB", "x"], "n": 7, "on": True, "ratio": 2.0}}}]
+    assert argument_literals(nested, "give me AB and x, 7 of them at ratio 2") == ["AB", "7", "2"]
+    # natural-language values are not required verbatim (the verifier still enforces them)
+    calls = [{"name": "f", "arguments": {"room": "living room", "period": "monthly", "id": "living-room-light-001", "cmd": "turn_on"}}]
+    src = "set the living room light living-room-light-001 to turn_on monthly"
+    assert argument_literals(calls, src) == ["living-room-light-001", "turn_on"]
+    assert argument_literals(calls, src, code_like_only=False) == ["living room", "monthly", "living-room-light-001", "turn_on"]
 
 
 def test_ideal_localization_passes() -> None:
@@ -106,7 +111,7 @@ def test_ideal_localization_passes() -> None:
         (EN_QUERY, "not_localized"),
         ("What is the weather in Paris on 2024-05-01? Use 3 day forecast!", "insufficient_script_ratio:ne-Deva"),
         ("२०२४-०५-०१ मा Paris को मौसम कस्तो छ? 3 दिनको पूर्वानुमान।", "missing_argument_literal:2024-05-01"),
-        ("2024-05-01 मा पेरिस को मौसम कस्तो छ? 3 दिनको पूर्वानुमान।", "missing_argument_literal:Paris"),
+        ("2024-05-01 मा पेरिस को मौसम कस्तो छ? 3 दिनको पूर्वानुमान।", "missing_argument_literal:Paris"),  # Capitalised proper noun counts as code-like
         ("2024-05-01 मा Paris को मौसम कस्तो छ? तीन दिनको पूर्वानुमान।", "missing_argument_literal:3"),
     ],
 )
@@ -346,3 +351,21 @@ def test_script_ratio_ignores_required_english_literals() -> None:
     assert check_localization(
         source_query=source, localized_query=source + " please", expected_calls=expected, spec=NE_SPEC
     )
+
+
+def test_only_task_ids_filters_loaded_rows(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    env = make_env(ScriptedInference(responses=[]))
+    records = [
+        {"query": f"q{i}", "tools": json.dumps([{"name": "f", "parameters": {}}]),
+         "answers": json.dumps([{"name": "f", "arguments": {}}])}
+        for i in range(5)
+    ]
+    monkeypatch.setattr(env, "_load_dataset", lambda *_: records)
+    ids = tmp_path / "ids.txt"
+    ids.write_text("1\n3\n\n", encoding="utf-8")
+    env.config.only_task_ids = str(ids)
+    env.config.dataset.limit = 5
+
+    tasks = env.load_tasks()
+
+    assert [t.id for t in tasks] == ["1", "3"]

@@ -62,6 +62,13 @@ This is not a word-for-word translation:
 
 MIN_LITERAL_LENGTH = 2
 
+# A literal must survive verbatim when it is identifier-like: digits, snake/kebab
+# case, dotted/slashed paths, @, or internal capitals (CamelCase, ALLCAPS, acronyms).
+# Plain lowercase words and phrases ("living room", "monthly", "high") are natural
+# language: a good localizer translates them and the policy recovers the exact
+# value from the tool schema, which the tool-call verifier then enforces.
+CODE_LIKE_RE = re.compile(r"\d|[_@/\\]|\w[-.]\w|(?<=\w)[A-Z]|^[A-Z]{2,}")
+
 SINGLE_TURN_TOOL_RULE = (
     "This is a single turn: you will not receive tool results before answering. "
     "If the request needs several tool calls, emit all of them now in this one "
@@ -117,6 +124,13 @@ class MultilingualToolUseConfig(EnvConfig):
             "with English kept for tool names, argument values, and technical terms."
         ),
     )
+    only_task_ids: Optional[str] = Field(
+        default=None,
+        description=(
+            "Path to a text file with one task id per line; only those rows are loaded. "
+            "Used to re-run rejected rows after a gate/prompt fix and merge the exports."
+        ),
+    )
     source_format: Literal["xlam", "hermes"] = Field(
         default="xlam",
         description=(
@@ -142,7 +156,10 @@ def protected_tokens(text: str) -> Counter[str]:
     :func:`argument_literals` instead.
     """
 
-    return Counter(match.group().strip() for match in URL_OR_EMAIL_RE.finditer(text))
+    return Counter(
+        match.group().strip().rstrip(".,;:!?)]}\"'`")
+        for match in URL_OR_EMAIL_RE.finditer(text)
+    )
 
 
 def _string_leaves(value: Any) -> List[str]:
@@ -162,13 +179,22 @@ def _string_leaves(value: Any) -> List[str]:
     return []
 
 
-def argument_literals(expected_calls: List[Dict[str, Any]], source_query: str) -> List[str]:
+def is_code_like(value: str) -> bool:
+    """Identifier-like, or a single capitalised token (a proper noun such as Paris)."""
+    value = value.strip()
+    return bool(CODE_LIKE_RE.search(value)) or bool(re.fullmatch(r"[A-Z][a-z]+", value))
+
+
+def argument_literals(
+    expected_calls: List[Dict[str, Any]], source_query: str, *, code_like_only: bool = True
+) -> List[str]:
     """Expected argument values that appear verbatim in the English query.
 
-    These are exactly the values the policy must copy into its call (strings and
-    numbers, numbers as ASCII digits), so they must still be present after
-    localization. Values the English query does not spell out (e.g. "7:00 PM"
-    for an expected "19:00") are the policy's job to infer, in any language.
+    These are the values the policy must copy into its call (strings and numbers,
+    numbers as ASCII digits), so they must still be present after localization.
+    With ``code_like_only`` (default) only identifier-like values are required —
+    see ``CODE_LIKE_RE``. Values the English query does not spell out (e.g.
+    "7:00 PM" for an expected "19:00") are the policy's job to infer.
     """
 
     haystack = source_query.casefold()
@@ -179,6 +205,8 @@ def argument_literals(expected_calls: List[Dict[str, Any]], source_query: str) -
             if not re.search(r"\w", candidate):
                 continue
             if len(candidate) < MIN_LITERAL_LENGTH and not candidate.isdigit():
+                continue
+            if code_like_only and not is_code_like(candidate):
                 continue
             if candidate.casefold() in haystack and candidate not in literals:
                 literals.append(candidate)
@@ -204,7 +232,9 @@ def check_localization(
     # removed before the target-script ratio is measured.
     literals = argument_literals(expected_calls, source_query)
     prose = localized
-    for token in sorted(literals, key=len, reverse=True):
+    for token in sorted(
+        argument_literals(expected_calls, source_query, code_like_only=False), key=len, reverse=True
+    ):
         prose = re.sub(re.escape(token), " ", prose, flags=re.IGNORECASE)
     prose = URL_OR_EMAIL_RE.sub(" ", prose)
     issues = list(language_issues(prose if prose.strip() else localized, spec))
@@ -262,9 +292,30 @@ class MultilingualToolUseEnv(ToolUseSingleTurnEnv):
     # Dataset handling
     # ------------------------------------------------------------------
     def load_tasks(self, limit: Optional[int] = None) -> Sequence[Task]:
-        if self.ml_config.source_format != "hermes":
-            return super().load_tasks(limit)
-        return self._load_hermes_tasks(limit)
+        wanted = self._wanted_task_ids()
+        if wanted is None:
+            return (
+                super().load_tasks(limit)
+                if self.ml_config.source_format != "hermes"
+                else self._load_hermes_tasks(limit)
+            )
+        # Scan the whole (bounded) stream and keep only the wanted ids.
+        scan_limit = max(limit or 0, self.config.dataset.limit or 0) or None
+        tasks = (
+            super().load_tasks(scan_limit)
+            if self.ml_config.source_format != "hermes"
+            else self._load_hermes_tasks(scan_limit)
+        )
+        selected = [task for task in tasks if task.id in wanted]
+        logger.info("only_task_ids: selected %s of %s rows", len(selected), len(tasks))
+        return selected
+
+    def _wanted_task_ids(self) -> Optional[set]:
+        path = self.ml_config.only_task_ids
+        if not path:
+            return None
+        with open(path, "r", encoding="utf-8") as handle:
+            return {line.strip() for line in handle if line.strip()}
 
     def _load_hermes_tasks(self, limit: Optional[int]) -> List[Task]:
         """hermes-function-calling-v1 single-turn rows -> Tasks with English ground truth."""
