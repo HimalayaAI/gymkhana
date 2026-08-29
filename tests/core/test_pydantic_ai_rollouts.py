@@ -165,3 +165,36 @@ async def test_lenient_transport_repairs_offspec_chat_completion() -> None:
     from openai.types.chat import ChatCompletion
 
     ChatCompletion.model_validate(data)
+
+
+def test_reasoning_helpers_split_inline_and_native_thinking() -> None:
+    from pydantic_ai.messages import ModelRequest, ModelResponse, TextPart, ThinkingPart, UserPromptPart
+
+    from gymkhana.core.services.inference.pydantic_ai import _thinking_text, split_think_tags
+
+    assert split_think_tags("plain answer") == ("plain answer", None)
+    assert split_think_tags("<think>\nstep 1\n</think>\nfinal") == ("final", "step 1")
+    assert split_think_tags("<THINK>a</THINK> x <think>b</think>") == ("x", "a\n\nb")
+
+    messages = [
+        ModelRequest(parts=[UserPromptPart("q")]),
+        ModelResponse(parts=[ThinkingPart(content=" native reasoning "), TextPart("answer")]),
+    ]
+    assert _thinking_text(messages) == "native reasoning"
+    assert _thinking_text([ModelResponse(parts=[TextPart("answer")])]) is None
+
+
+@pytest.mark.asyncio
+async def test_generate_with_reasoning_returns_native_thinking(monkeypatch) -> None:
+    from pydantic_ai.models.function import FunctionModel
+    from pydantic_ai.messages import ModelResponse, TextPart, ThinkingPart
+
+    def respond(messages, info):
+        return ModelResponse(parts=[ThinkingPart(content="I should greet."), TextPart("नमस्ते")])
+
+    service = PydanticAIInferenceService()
+    content, reasoning = await service.generate_with_reasoning(
+        messages=[{"role": "user", "content": "hi"}], model=FunctionModel(respond)
+    )
+    assert content == "नमस्ते"
+    assert reasoning == "I should greet."

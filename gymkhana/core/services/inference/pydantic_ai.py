@@ -78,6 +78,32 @@ def lenient_openai_http_client() -> httpx.AsyncClient:
     return httpx.AsyncClient(transport=_LenientOpenAITransport(), timeout=httpx.Timeout(600.0))
 
 
+THINK_RE = re.compile(r"<think>\s*(.*?)\s*</think>", re.DOTALL | re.IGNORECASE)
+
+
+def split_think_tags(text: str) -> tuple[str, Optional[str]]:
+    """Separate inline ``<think>…</think>`` blocks from the visible answer."""
+    if not text or "<think" not in text.lower():
+        return text, None
+    blocks = [block for block in THINK_RE.findall(text) if block.strip()]
+    visible = THINK_RE.sub("", text).strip()
+    return visible, ("\n\n".join(blocks) or None)
+
+
+def _thinking_text(messages: Any) -> Optional[str]:
+    """Collect provider-native reasoning (Pydantic AI ``ThinkingPart``) from a run."""
+    from pydantic_ai.messages import ModelResponse, ThinkingPart
+
+    chunks = [
+        part.content
+        for message in messages
+        if isinstance(message, ModelResponse)
+        for part in message.parts
+        if isinstance(part, ThinkingPart) and getattr(part, "content", None)
+    ]
+    return "\n\n".join(chunk.strip() for chunk in chunks if chunk.strip()) or None
+
+
 LITELLM_PREFIX = "litellm:"
 
 
@@ -219,7 +245,7 @@ class PydanticAIInferenceService(InferenceService):
                 history.append(ModelRequest(parts=[UserPromptPart(content)]))
         return prompt, history
 
-    async def generate(
+    async def _run(
         self,
         *,
         messages: List[Dict[str, str]],
@@ -228,7 +254,7 @@ class PydanticAIInferenceService(InferenceService):
         temperature: Optional[float] = None,
         max_tokens: Optional[int] = None,
         **kwargs: Any,
-    ) -> str:
+    ) -> tuple[str, Optional[str]]:
         from pydantic_ai import Agent
         from pydantic_ai.settings import ModelSettings
 
@@ -254,7 +280,51 @@ class PydanticAIInferenceService(InferenceService):
             message_history=history or None,
             model_settings=settings,
         )
-        return _serialize_output(result.output)
+        content, inline_reasoning = split_think_tags(_serialize_output(result.output))
+        reasoning = _thinking_text(result.new_messages()) or inline_reasoning
+        return content, reasoning
+
+    async def generate(
+        self,
+        *,
+        messages: List[Dict[str, str]],
+        system_prompt: Optional[str] = None,
+        model: Optional[str] = None,
+        temperature: Optional[float] = None,
+        max_tokens: Optional[int] = None,
+        **kwargs: Any,
+    ) -> str:
+        content, _ = await self._run(
+            messages=messages,
+            system_prompt=system_prompt,
+            model=model,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            **kwargs,
+        )
+        return content
+
+    async def generate_with_reasoning(
+        self,
+        *,
+        messages: List[Dict[str, str]],
+        system_prompt: Optional[str] = None,
+        model: Optional[str] = None,
+        temperature: Optional[float] = None,
+        max_tokens: Optional[int] = None,
+        **kwargs: Any,
+    ) -> tuple[str, Optional[str]]:
+        """Return ``(content, reasoning)``; reasoning is provider-native thinking
+        (``reasoning`` / ``reasoning_content`` fields) or inline ``<think>`` blocks."""
+        return await self._run(
+            messages=messages,
+            system_prompt=system_prompt,
+            model=model,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            **kwargs,
+        )
+
 
     async def generate_structured(
         self,

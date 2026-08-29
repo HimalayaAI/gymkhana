@@ -238,3 +238,56 @@ def test_language_registry_shim_still_importable() -> None:
 
     assert Shim is LanguageSpec
     assert resolve_language("ne-Latn").context_label == "Sandarbh"
+
+
+def test_hermes_rows_become_tasks_with_english_ground_truth(monkeypatch: pytest.MonkeyPatch) -> None:
+    inference = ScriptedInference(responses=[])
+    env = make_env(inference)
+    env.config.source_format = "hermes"
+    tools = [{"type": "function", "function": {"name": "get_camera_live_feed", "parameters": {"type": "object", "properties": {"camera_id": {"type": "string"}}}}}]
+    records = [
+        {
+            "id": "row-1",
+            "category": "IoT and Home Automation",
+            "subcategory": "Security",
+            "task": "View camera feed",
+            "tools": json.dumps(tools),
+            "conversations": [
+                {"from": "system", "value": "You are a function calling AI model. <tools>" + json.dumps(tools) + "</tools>"},
+                {"from": "human", "value": "Show me the front_door camera in 1080p."},
+                {"from": "gpt", "value": '<tool_call>\n{"name": "get_camera_live_feed", "arguments": {"camera_id": "front_door", "stream_quality": "1080p"}}\n</tool_call>'},
+            ],
+        },
+        {"id": "row-2", "tools": "[]", "conversations": [{"from": "human", "value": "no tools here"}]},
+    ]
+    monkeypatch.setattr(env, "_load_dataset", lambda *_: records)
+
+    tasks = env.load_tasks(limit=10)
+
+    assert [t.id for t in tasks] == ["row-1"]
+    task = tasks[0]
+    assert task.prompt == "Show me the front_door camera in 1080p."
+    assert task.metadata["expected_tool_calls"] == [
+        {"name": "get_camera_live_feed", "arguments": {"camera_id": "front_door", "stream_quality": "1080p"}}
+    ]
+    assert task.metadata["tools_openai"][0]["function"]["name"] == "get_camera_live_feed"
+    assert task.metadata["source_provenance"]["category"] == "IoT and Home Automation"
+    assert argument_literals(task.metadata["expected_tool_calls"], task.prompt) == ["front_door", "1080p"]
+
+
+def test_hermes_config_loads() -> None:
+    env_name, config = load_environment_config(
+        Path("configs/multilingual_tool_use/hermes_singleturn_nepali.yaml")
+    )
+    assert env_name == "multilingual-tool-use"
+    assert config.source_format == "hermes"
+    assert config.dataset.dataset_config == "func_calling_singleturn"
+    assert config.dataset.num_rollouts == 4
+
+
+def test_localizer_prompt_asks_for_spoken_requests() -> None:
+    env = make_env(ScriptedInference(responses=[]))
+    prompt = env._localizer_system_prompt()
+    assert "Siri or Alexa" in prompt
+    assert "not a word-for-word translation" in prompt
+    assert "never as key=value pairs" in prompt
