@@ -62,3 +62,46 @@ async def test_batch_failure_isolated_and_order_preserved(monkeypatch) -> None:
     outputs = await service.batch_generate(prompts=["one", "bad", "three"])
 
     assert outputs == ["ONE", "", "THREE"]
+
+
+@pytest.mark.asyncio
+async def test_schema_tools_are_returned_as_deferred_calls_json() -> None:
+    """OpenAI-style tool dicts become external tools; the model's calls come back as JSON."""
+    import json
+
+    from pydantic_ai.models.test import TestModel
+
+    from gymkhana.core.services.inference.pydantic_ai import _tool_definitions
+
+    tools = [
+        {
+            "type": "function",
+            "function": {
+                "name": "get_weather",
+                "description": "Weather for a city",
+                "parameters": {
+                    "type": "object",
+                    "properties": {"city": {"type": "string"}},
+                    "required": ["city"],
+                },
+            },
+        }
+    ]
+    definitions = _tool_definitions(tools)
+    assert [d.name for d in definitions] == ["get_weather"]
+    assert definitions[0].parameters_json_schema["required"] == ["city"]
+
+    service = PydanticAIInferenceService()
+    raw = await service.generate(
+        messages=[{"role": "user", "content": "weather in Paris?"}],
+        system_prompt="call tools",
+        model=TestModel(),
+        tools=tools,
+    )
+    calls = json.loads(raw)
+    assert calls and calls[0]["name"] == "get_weather"
+    assert isinstance(calls[0]["arguments"], dict) and "city" in calls[0]["arguments"]
+    assert calls[0]["tool_call_id"]
+
+    plain = await service.generate(messages=[{"role": "user", "content": "hi"}], model=TestModel())
+    assert isinstance(plain, str)

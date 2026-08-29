@@ -3,12 +3,75 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field
 
 from .base import InferenceService, StructuredOutputT
+
+
+def _tool_definitions(tools: Any) -> list[Any]:
+    """Convert OpenAI-style function tool dicts into Pydantic AI ``ToolDefinition``s.
+
+    Accepts ``{"type": "function", "function": {name, description, parameters}}``
+    and bare ``{name, description, parameters}`` shapes. Unknown entries are skipped.
+    """
+    from pydantic_ai.tools import ToolDefinition
+
+    definitions: list[Any] = []
+    for tool in tools or ():
+        if not isinstance(tool, dict):
+            continue
+        spec = tool.get("function") if tool.get("type") == "function" else tool
+        if not isinstance(spec, dict) or not spec.get("name"):
+            continue
+        parameters = spec.get("parameters") or {"type": "object", "properties": {}}
+        definitions.append(
+            ToolDefinition(
+                name=str(spec["name"]),
+                description=spec.get("description") or None,
+                parameters_json_schema=parameters,
+            )
+        )
+    return definitions
+
+
+def _agent_tool_kwargs(tools: Any) -> Dict[str, Any]:
+    """Agent kwargs for tools supplied as schema dicts (external, never executed).
+
+    The model's tool calls come back as a ``DeferredToolRequests`` output, which
+    ``generate`` serializes as ``[{"name", "arguments", "tool_call_id"}]`` JSON so
+    tool-use environments can verify them against ground truth.
+    """
+    definitions = _tool_definitions(tools)
+    if not definitions:
+        return {"output_type": str}
+    from pydantic_ai import DeferredToolRequests
+    from pydantic_ai.toolsets import ExternalToolset
+
+    return {
+        "output_type": [str, DeferredToolRequests],
+        "toolsets": [ExternalToolset(definitions)],
+    }
+
+
+def _serialize_output(output: Any) -> str:
+    from pydantic_ai import DeferredToolRequests
+
+    if isinstance(output, DeferredToolRequests):
+        return json.dumps(
+            [
+                {
+                    "name": call.tool_name,
+                    "arguments": call.args_as_dict(),
+                    "tool_call_id": call.tool_call_id,
+                }
+                for call in output.calls
+            ]
+        )
+    return output if isinstance(output, str) else str(output)
 
 
 class PydanticAIInferenceService(InferenceService):
@@ -60,8 +123,7 @@ class PydanticAIInferenceService(InferenceService):
         agent = Agent(
             model or self.default_model,
             instructions=system_prompt,
-            output_type=str,
-            tools=kwargs.get("tools") or (),
+            **_agent_tool_kwargs(kwargs.get("tools")),
         )
         settings_values: Dict[str, Any] = {
             "max_tokens": max_tokens if max_tokens is not None else self.default_max_tokens,
@@ -80,7 +142,7 @@ class PydanticAIInferenceService(InferenceService):
             message_history=history or None,
             model_settings=settings,
         )
-        return result.output
+        return _serialize_output(result.output)
 
     async def generate_structured(
         self,
@@ -102,7 +164,6 @@ class PydanticAIInferenceService(InferenceService):
             model or self.default_model,
             instructions=system_prompt,
             output_type=output_type,
-            tools=kwargs.get("tools") or (),
         )
         settings_values: Dict[str, Any] = {
             "max_tokens": max_tokens if max_tokens is not None else self.default_max_tokens,
