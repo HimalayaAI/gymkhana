@@ -442,7 +442,9 @@ def sub_agent():
         # Accept the former separate client field during migration, while making
         # provider-qualified Pydantic AI model names the canonical API.
         if ":" not in model:
-            provider = client if client in {"openai", "anthropic", "google-gla"} else "openai"
+            provider = {"gemini": "google", "google-gla": "google"}.get(client, client)
+            if provider not in {"openai", "anthropic", "google"}:
+                provider = "openai"
             model = f"{provider}:{model}"
 
         inference = PydanticAIInferenceService(
