@@ -6,12 +6,76 @@ import asyncio
 import json
 import os
 import re
+
+import httpx
 import logging
 from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field
 
 from .base import InferenceService, StructuredOutputT
+
+
+def normalize_chat_completion(data: Any) -> bool:
+    """Coerce off-spec OpenAI-compatible responses in place. Returns True if changed.
+
+    Seen from self-hosted endpoints (e.g. Tarka): ``choices[].index`` missing,
+    ``created`` and ``usage`` counts as strings. Strict clients reject these.
+    """
+    if not isinstance(data, dict):
+        return False
+    changed = False
+    for position, choice in enumerate(data.get("choices") or []):
+        if isinstance(choice, dict) and not isinstance(choice.get("index"), int):
+            choice["index"] = position
+            changed = True
+    created = data.get("created")
+    if isinstance(created, str) and created.isdigit():
+        data["created"] = int(created)
+        changed = True
+    usage = data.get("usage")
+    if isinstance(usage, dict):
+        for key, value in list(usage.items()):
+            if isinstance(value, str) and value.isdigit():
+                usage[key] = int(value)
+                changed = True
+    return changed
+
+
+class _LenientOpenAITransport(httpx.AsyncBaseTransport):
+    """httpx transport that repairs off-spec chat-completion JSON bodies."""
+
+    def __init__(self, inner: Optional[httpx.AsyncBaseTransport] = None) -> None:
+        self._inner = inner or httpx.AsyncHTTPTransport()
+
+    async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
+        response = await self._inner.handle_async_request(request)
+        content_type = response.headers.get("content-type", "")
+        if "chat/completions" not in str(request.url) or "application/json" not in content_type:
+            return response
+        body = await response.aread()
+        try:
+            data = json.loads(body)
+        except ValueError:
+            return response
+        if not normalize_chat_completion(data):
+            return httpx.Response(
+                response.status_code, headers=response.headers, content=body, request=request
+            )
+        headers = {k: v for k, v in response.headers.items() if k.lower() != "content-length"}
+        return httpx.Response(
+            response.status_code,
+            headers=headers,
+            content=json.dumps(data).encode("utf-8"),
+            request=request,
+        )
+
+    async def aclose(self) -> None:
+        await self._inner.aclose()
+
+
+def lenient_openai_http_client() -> httpx.AsyncClient:
+    return httpx.AsyncClient(transport=_LenientOpenAITransport(), timeout=httpx.Timeout(600.0))
 
 
 LITELLM_PREFIX = "litellm:"
@@ -54,7 +118,9 @@ def resolve_model(model: Any) -> Any:
 
     return OpenAIChatModel(
         model[len(LITELLM_PREFIX):],
-        provider=LiteLLMProvider(api_key=api_key, api_base=api_base),
+        provider=LiteLLMProvider(
+            api_key=api_key, api_base=api_base, http_client=lenient_openai_http_client()
+        ),
     )
 
 

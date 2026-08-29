@@ -125,3 +125,43 @@ def test_litellm_prefix_binds_to_configured_endpoint(monkeypatch) -> None:
     monkeypatch.delenv("LITELLM_ENDPOINT")
     with pytest.raises(ValueError, match="LITELLM_ENDPOINT"):
         resolve_model("litellm:anything")
+
+
+@pytest.mark.asyncio
+async def test_lenient_transport_repairs_offspec_chat_completion() -> None:
+    import json
+
+    import httpx
+
+    from gymkhana.core.services.inference.pydantic_ai import (
+        _LenientOpenAITransport,
+        normalize_chat_completion,
+    )
+
+    offspec = {
+        "id": "x",
+        "object": "chat.completion",
+        "created": "1788013978",
+        "model": "himalaya-gemma-4-bf16",
+        "choices": [{"message": {"role": "assistant", "content": "नमस्ते"}, "finish_reason": "stop"}],
+        "usage": {"prompt_tokens": "17", "completion_tokens": "5", "total_tokens": "22"},
+    }
+    assert normalize_chat_completion(json.loads(json.dumps(offspec))) is True
+    assert normalize_chat_completion({"choices": [{"index": 0}], "created": 1, "usage": {"a": 1}}) is False
+
+    def fake(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=offspec, headers={"content-length": "999"})
+
+    transport = _LenientOpenAITransport(httpx.MockTransport(fake))
+    async with httpx.AsyncClient(transport=transport) as client:
+        response = await client.post("https://tarka.rest/v1/chat/completions", json={})
+    data = response.json()
+    assert data["choices"][0]["index"] == 0
+    assert data["created"] == 1788013978
+    assert data["usage"]["total_tokens"] == 22
+    assert data["choices"][0]["message"]["content"] == "नमस्ते"
+
+    # Now the strict OpenAI client type accepts it.
+    from openai.types.chat import ChatCompletion
+
+    ChatCompletion.model_validate(data)
