@@ -198,3 +198,25 @@ async def test_generate_with_reasoning_returns_native_thinking(monkeypatch) -> N
     )
     assert content == "नमस्ते"
     assert reasoning == "I should greet."
+
+
+@pytest.mark.asyncio
+async def test_lenient_transport_handles_gzip_encoded_bodies() -> None:
+    import gzip
+    import json
+
+    import httpx
+
+    from gymkhana.core.services.inference.pydantic_ai import _LenientOpenAITransport
+
+    payload = {"id": "x", "object": "chat.completion", "created": 1, "model": "m",
+               "choices": [{"index": 0, "message": {"role": "assistant", "content": "ok"}, "finish_reason": "stop"}],
+               "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2}}
+
+    def fake(request: httpx.Request) -> httpx.Response:
+        raw = gzip.compress(json.dumps(payload).encode())
+        return httpx.Response(200, content=raw, headers={"content-encoding": "gzip", "content-type": "application/json", "content-length": str(len(raw))})
+
+    async with httpx.AsyncClient(transport=_LenientOpenAITransport(httpx.MockTransport(fake))) as client:
+        response = await client.post("https://example.test/v1/chat/completions", json={})
+    assert response.json()["choices"][0]["message"]["content"] == "ok"

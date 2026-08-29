@@ -53,22 +53,21 @@ class _LenientOpenAITransport(httpx.AsyncBaseTransport):
         content_type = response.headers.get("content-type", "")
         if "chat/completions" not in str(request.url) or "application/json" not in content_type:
             return response
+        # ``aread`` returns the *decoded* body, so the rebuilt response must not
+        # carry the original transfer headers (content-encoding / content-length).
         body = await response.aread()
+        headers = {
+            k: v
+            for k, v in response.headers.items()
+            if k.lower() not in {"content-length", "content-encoding", "transfer-encoding"}
+        }
         try:
             data = json.loads(body)
         except ValueError:
-            return response
-        if not normalize_chat_completion(data):
-            return httpx.Response(
-                response.status_code, headers=response.headers, content=body, request=request
-            )
-        headers = {k: v for k, v in response.headers.items() if k.lower() != "content-length"}
-        return httpx.Response(
-            response.status_code,
-            headers=headers,
-            content=json.dumps(data).encode("utf-8"),
-            request=request,
-        )
+            data = None
+        if data is not None and normalize_chat_completion(data):
+            body = json.dumps(data).encode("utf-8")
+        return httpx.Response(response.status_code, headers=headers, content=body, request=request)
 
     async def aclose(self) -> None:
         await self._inner.aclose()
