@@ -6,9 +6,9 @@ import asyncio
 import logging
 from typing import Any, Dict, List, Optional
 
-from pydantic import Field
+from pydantic import BaseModel, Field
 
-from .base import InferenceService
+from .base import InferenceService, StructuredOutputT
 
 
 class PydanticAIInferenceService(InferenceService):
@@ -81,6 +81,49 @@ class PydanticAIInferenceService(InferenceService):
             model_settings=settings,
         )
         return result.output
+
+    async def generate_structured(
+        self,
+        *,
+        messages: List[Dict[str, str]],
+        output_type: type[StructuredOutputT],
+        system_prompt: Optional[str] = None,
+        model: Optional[str] = None,
+        temperature: Optional[float] = None,
+        max_tokens: Optional[int] = None,
+        **kwargs: Any,
+    ) -> StructuredOutputT:
+        """Generate a Pydantic-validated response using Pydantic AI."""
+
+        from pydantic_ai import Agent
+        from pydantic_ai.settings import ModelSettings
+
+        agent = Agent(
+            model or self.default_model,
+            instructions=system_prompt,
+            output_type=output_type,
+            tools=kwargs.get("tools") or (),
+        )
+        settings_values: Dict[str, Any] = {
+            "max_tokens": max_tokens if max_tokens is not None else self.default_max_tokens,
+        }
+        resolved_temperature = (
+            temperature if temperature is not None else self.default_temperature
+        )
+        if resolved_temperature is not None:
+            settings_values["temperature"] = resolved_temperature
+        if kwargs.get("seed") is not None:
+            settings_values["seed"] = kwargs["seed"]
+        prompt, history = self._conversation(messages)
+        result = await agent.run(
+            prompt,
+            message_history=history or None,
+            model_settings=ModelSettings(**settings_values),
+        )
+        output = result.output
+        if isinstance(output, BaseModel):
+            return output_type.model_validate(output.model_dump())
+        return output_type.model_validate(output)
 
     async def batch_generate(
         self,
