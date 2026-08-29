@@ -156,6 +156,9 @@ async def test_localized_query_reaches_policy_and_correct_call_is_rewarded() -> 
     meta = env.build_sharegpt_metadata(result, task)
     assert meta["target_language"] == "ne-Deva"
     assert meta["expected_tool_calls"] == EXPECTED
+    assert meta["tools"] == task.metadata["tools_openai"]
+    assert meta["localizer_model"] == env.ml_config.localizer_llm.model_identifier
+    assert meta["policy_model"]
 
 
 @pytest.mark.asyncio

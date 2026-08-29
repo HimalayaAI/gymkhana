@@ -527,7 +527,10 @@ class MultilingualToolUseEnv(ToolUseSingleTurnEnv):
                 "target_language": self.ml_config.localization.target_language,
                 "source_query": task.prompt,
                 "expected_tool_calls": task.metadata.get("expected_tool_calls", []),
+                "tools": task.metadata.get("tools_openai", []),
                 "source_provenance": task.metadata.get("source_provenance", {}),
+                "localizer_model": self.ml_config.localizer_llm.model_identifier,
+                "policy_model": self.config.get_llm_config().model_identifier,
             }
         )
         return base
