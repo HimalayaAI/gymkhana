@@ -27,7 +27,8 @@ dataset rows
 
 The execution core was ported from DeepGym and rebranded for HimalayaAI.
 Inference is routed through [Pydantic AI v2](https://ai.pydantic.dev/) using
-provider-qualified model names such as `anthropic:...` and `openai:...`.
+provider-qualified model names such as `anthropic:...`, `openai:...`, and
+`google:...` (Gemini, native — set `GEMINI_API_KEY`; no LiteLLM proxy needed).
 Environment implementations depend on Gymkhana's typed inference service rather
 than provider SDKs.
 
@@ -226,6 +227,25 @@ python -m gymkhana.run \
   --limit 100 \
   --num-rollouts 4
 ```
+
+Gemini works the same way with the `google` client (`gemini` is accepted as an
+alias):
+
+```bash
+export GEMINI_API_KEY=...
+python -m gymkhana.run \
+  --env english-sharegpt-to-nepali \
+  --model google:gemini-2.5-flash \
+  --judge-model google:gemini-2.5-flash-lite \
+  --client google \
+  --limit 100
+```
+
+`--client` only prefixes *bare* model names (`--client google --model
+gemini-2.5-flash` → `google:gemini-2.5-flash`); a model that already carries a
+`provider:` prefix routes by that prefix. `--client litellm` expects a running
+LiteLLM proxy (`LITELLM_PROXY_API_BASE` / `LITELLM_PROXY_API_KEY`) and is not
+needed for Gemini.
 
 Run the checked-in OpenHermes configuration through the same standard runner:
 
