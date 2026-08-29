@@ -105,3 +105,23 @@ async def test_schema_tools_are_returned_as_deferred_calls_json() -> None:
 
     plain = await service.generate(messages=[{"role": "user", "content": "hi"}], model=TestModel())
     assert isinstance(plain, str)
+
+
+def test_litellm_prefix_binds_to_configured_endpoint(monkeypatch) -> None:
+    from gymkhana.core.services.inference.pydantic_ai import resolve_model
+
+    monkeypatch.delenv("LITELLM_PROXY_API_BASE", raising=False)
+    monkeypatch.delenv("LITELLM_PROXY_API_KEY", raising=False)
+    monkeypatch.setenv("LITELLM_ENDPOINT", "https://tarka.rest/v1/chat/completions")
+    monkeypatch.setenv("LITELLM_API_KEY", "test-key")
+
+    model = resolve_model("litellm:himalaya-gemma-4-bf16")
+    assert type(model).__name__ == "OpenAIChatModel"
+    assert model.model_name == "himalaya-gemma-4-bf16"
+    assert str(model._provider.base_url).rstrip("/") == "https://tarka.rest/v1"
+
+    assert resolve_model("openai:gpt-4.1-mini") == "openai:gpt-4.1-mini"
+
+    monkeypatch.delenv("LITELLM_ENDPOINT")
+    with pytest.raises(ValueError, match="LITELLM_ENDPOINT"):
+        resolve_model("litellm:anything")

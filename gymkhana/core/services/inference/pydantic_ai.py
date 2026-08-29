@@ -4,12 +4,58 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
+import re
 import logging
 from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field
 
 from .base import InferenceService, StructuredOutputT
+
+
+LITELLM_PREFIX = "litellm:"
+
+
+def _litellm_api_base() -> Optional[str]:
+    """Base URL for the LiteLLM / OpenAI-compatible endpoint.
+
+    ``LITELLM_PROXY_API_BASE`` wins; otherwise ``LITELLM_ENDPOINT`` (which the
+    repo's ``.env`` stores as a full ``.../v1/chat/completions`` URL) is trimmed
+    to its ``/v1`` base.
+    """
+    explicit = os.getenv("LITELLM_PROXY_API_BASE")
+    if explicit:
+        return explicit
+    endpoint = os.getenv("LITELLM_ENDPOINT")
+    if not endpoint:
+        return None
+    return re.sub(r"/chat/completions/?$", "", endpoint.strip())
+
+
+def resolve_model(model: Any) -> Any:
+    """Turn ``litellm:<name>`` into a model bound to the configured endpoint.
+
+    Pydantic AI's ``litellm:`` provider reads no environment variables, so
+    without this every ``litellm:`` model silently hits api.openai.com. Any other
+    value (other prefixes, or Model objects such as ``TestModel``) passes through.
+    """
+    if not isinstance(model, str) or not model.startswith(LITELLM_PREFIX):
+        return model
+    api_base = _litellm_api_base()
+    api_key = os.getenv("LITELLM_PROXY_API_KEY") or os.getenv("LITELLM_API_KEY")
+    if not api_base or not api_key:
+        raise ValueError(
+            f"{model!r} needs LITELLM_ENDPOINT (or LITELLM_PROXY_API_BASE) and "
+            "LITELLM_API_KEY (or LITELLM_PROXY_API_KEY) in the environment"
+        )
+    from pydantic_ai.models.openai import OpenAIChatModel
+    from pydantic_ai.providers.litellm import LiteLLMProvider
+
+    return OpenAIChatModel(
+        model[len(LITELLM_PREFIX):],
+        provider=LiteLLMProvider(api_key=api_key, api_base=api_base),
+    )
 
 
 def _tool_definitions(tools: Any) -> list[Any]:
@@ -121,7 +167,7 @@ class PydanticAIInferenceService(InferenceService):
         from pydantic_ai.settings import ModelSettings
 
         agent = Agent(
-            model or self.default_model,
+            resolve_model(model or self.default_model),
             instructions=system_prompt,
             **_agent_tool_kwargs(kwargs.get("tools")),
         )
@@ -161,7 +207,7 @@ class PydanticAIInferenceService(InferenceService):
         from pydantic_ai.settings import ModelSettings
 
         agent = Agent(
-            model or self.default_model,
+            resolve_model(model or self.default_model),
             instructions=system_prompt,
             output_type=output_type,
         )
