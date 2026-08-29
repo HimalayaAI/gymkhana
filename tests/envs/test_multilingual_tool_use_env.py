@@ -309,3 +309,20 @@ def test_policy_reasoning_mode_controls_system_prompt(mode: str, expected_fragme
     else:
         assert expected_fragment in prompt
     assert "verbatim" in prompt
+
+
+@pytest.mark.asyncio
+async def test_localization_disabled_runs_english_baseline() -> None:
+    policy_output = json.dumps([{"name": "get_weather", "arguments": EXPECTED[0]["arguments"]}])
+    inference = ScriptedInference(responses=[policy_output])
+    env = make_env(inference)
+    env.config.localization.enabled = False
+    task = make_task()
+
+    result = await env.run_task(task)
+
+    assert len(inference.calls) == 1  # no localizer call
+    assert inference.calls[0]["messages"] == [{"role": "user", "content": EN_QUERY}]
+    assert "Nepali" not in inference.calls[0]["system_prompt"]
+    assert result.total_reward == 1.0
+    assert task.metadata["localization"]["skipped"] is True

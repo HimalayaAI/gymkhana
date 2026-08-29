@@ -62,12 +62,23 @@ This is not a word-for-word translation:
 
 MIN_LITERAL_LENGTH = 2
 
+SINGLE_TURN_TOOL_RULE = (
+    "This is a single turn: you will not receive tool results before answering. "
+    "If the request needs several tool calls, emit all of them now in this one "
+    "response, in the order they should run, even when a later call would "
+    "normally depend on an earlier result."
+)
+
 
 class LocalizationSettings(BaseModel):
     """Controls for localizing the user query."""
 
     model_config = ConfigDict(validate_assignment=True)
 
+    enabled: bool = Field(
+        default=True,
+        description="False runs the policy on the original English query (baseline / A-B).",
+    )
     target_language: str = "ne-Deva"
     languages: Dict[str, LanguageSpec] = Field(default_factory=dict)
     max_attempts: int = Field(default=1, ge=1, le=3)
@@ -308,12 +319,23 @@ class MultilingualToolUseEnv(ToolUseSingleTurnEnv):
     async def localize_query(self, task: Task) -> Dict[str, Any]:
         """Localize ``task.prompt`` once; result cached in ``task.metadata``."""
 
+        if self._inference_service is None:
+            self._ensure_orchestrator()
         cached = task.metadata.get("localization")
         if cached is not None:
             return cached
+        if not self.ml_config.localization.enabled:
+            outcome = {
+                "target_language": "en",
+                "source_query": task.prompt,
+                "localized_query": task.prompt,
+                "passed": True,
+                "attempts": [],
+                "skipped": True,
+            }
+            task.metadata["localization"] = outcome
+            return outcome
 
-        if self._inference_service is None:
-            self._ensure_orchestrator()
         if self._inference_service is None:
             raise RuntimeError("Inference service is not available for localization")
 
@@ -376,6 +398,8 @@ class MultilingualToolUseEnv(ToolUseSingleTurnEnv):
         return None
 
     def build_system_prompt(self, task: Task) -> str:
+        if not self.ml_config.localization.enabled:
+            return "\n\n".join([super().build_system_prompt(task), SINGLE_TURN_TOOL_RULE])
         spec = self.language_spec
         parts = [
             TOOL_USE_SYSTEM_PROMPT,
@@ -385,6 +409,7 @@ class MultilingualToolUseEnv(ToolUseSingleTurnEnv):
                 "schemas exactly. Copy identifiers, numbers, and named values from the "
                 "request verbatim; never translate or transliterate them."
             ),
+            SINGLE_TURN_TOOL_RULE,
         ]
         reasoning_instruction = self._reasoning_instruction()
         if reasoning_instruction:
