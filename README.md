@@ -57,6 +57,7 @@ than provider SDKs.
 | `oolong` | Long-context reasoning |
 | `swe` | Software-engineering tasks in a sandbox |
 | `tool-use-singleturn` | Verifiable single-turn tool use |
+| `multilingual-tool-use` | xlam tool use with the user query localized (Nepali or any `LanguageSpec`) |
 
 ## Installation
 
@@ -459,6 +460,32 @@ An environment is ready to merge when its offline tests pass, registration and
 CLI discovery work, its reward contract is documented, dataset licensing is
 clear, and one bounded end-to-end smoke test has succeeded for any external
 services it requires.
+
+## Multilingual tool use: localized query, English ground truth
+
+`multilingual-tool-use` turns `Salesforce/xlam-function-calling-60k` into a
+target-language function-calling environment. The verifier is
+language-invariant — the right call for "Kathmandu ko mausam kasto chha?" is the
+same `get_weather(city="Kathmandu")` as for the English query — so tool schemas
+and expected calls stay untouched and only the user query is localized:
+
+```
+xlam row ─▶ localizer LLM (query → ne-Deva) ─▶ gate: language + protected tokens + argument literals
+         ─▶ policy rollouts, native tool calling, English schemas ─▶ reward = tool_calls_match
+```
+
+Rows whose localization drops a number, identifier, URL, or any argument value
+that the policy must copy are rejected before the policy runs (audit reason
+`localization_failed`). Only rows with correct tool calls are exported.
+
+```bash
+python -m gymkhana.run \
+  --config configs/multilingual_tool_use/xlam_nepali.yaml \
+  --limit 20 --num-rollouts 4 --no-database
+```
+
+Target languages come from the shared `LanguageSpec` registry
+(`gymkhana/envs/languages.py`); declare more under `localization.languages`.
 
 ## Development
 

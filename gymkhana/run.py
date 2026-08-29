@@ -102,6 +102,7 @@ def main():
             "romanized-nepali",
             "english-sharegpt-to-nepali",
             "multi-turn-qa",
+            "multilingual-tool-use",
         ],
         default=None,
         help="Task environment (overrides config)"
