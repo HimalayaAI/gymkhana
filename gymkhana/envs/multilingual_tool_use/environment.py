@@ -200,16 +200,21 @@ def check_localization(
     if localized.casefold() == source_query.strip().casefold():
         return ["not_localized"]
 
-    issues = list(language_issues(localized, spec))
+    # Argument literals and URLs must stay in their original script, so they are
+    # removed before the target-script ratio is measured.
+    literals = argument_literals(expected_calls, source_query)
+    prose = localized
+    for token in sorted(literals, key=len, reverse=True):
+        prose = re.sub(re.escape(token), " ", prose, flags=re.IGNORECASE)
+    prose = URL_OR_EMAIL_RE.sub(" ", prose)
+    issues = list(language_issues(prose if prose.strip() else localized, spec))
 
     missing = protected_tokens(source_query) - protected_tokens(localized)
     issues.extend(f"missing_protected_token:{token}" for token in sorted(missing))
 
     lowered = localized.casefold()
     issues.extend(
-        f"missing_argument_literal:{literal}"
-        for literal in argument_literals(expected_calls, source_query)
-        if literal.casefold() not in lowered
+        f"missing_argument_literal:{literal}" for literal in literals if literal.casefold() not in lowered
     )
     return issues
 

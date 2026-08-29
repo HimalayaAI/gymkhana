@@ -326,3 +326,23 @@ async def test_localization_disabled_runs_english_baseline() -> None:
     assert "Nepali" not in inference.calls[0]["system_prompt"]
     assert result.total_reward == 1.0
     assert task.metadata["localization"]["skipped"] is True
+
+
+def test_script_ratio_ignores_required_english_literals() -> None:
+    expected = [
+        {"name": "control_smart_light", "arguments": {"device_id": "living-room-light-001", "command": "turn_on"}},
+        {"name": "set_thermostat_temperature", "arguments": {"device_id": "hallway-thermostat-002", "temperature": 72}},
+    ]
+    source = "Turn on living-room-light-001 with turn_on and set hallway-thermostat-002 to 72."
+    localized = (
+        "मेरो living room को smart light, जसको device ID living-room-light-001 हो, command turn_on "
+        "प्रयोग गरेर on गरिदिनुहोस्। साथै hallway को smart thermostat, जसको device ID "
+        "hallway-thermostat-002 हो, त्यसको temperature 72°F मा सेट गरिदिनुहोस्।"
+    )
+    assert check_localization(
+        source_query=source, localized_query=localized, expected_calls=expected, spec=NE_SPEC
+    ) == []
+    # Still rejects when the prose itself is English.
+    assert check_localization(
+        source_query=source, localized_query=source + " please", expected_calls=expected, spec=NE_SPEC
+    )
