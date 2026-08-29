@@ -82,12 +82,15 @@ def test_environment_is_registered() -> None:
 
 
 def test_protected_tokens_and_argument_literals() -> None:
-    assert protected_tokens(EN_QUERY)["2024-05-01"] == 1
-    assert protected_tokens(EN_QUERY)["3"] == 1
+    assert protected_tokens("mail bob@example.com and open https://x.io/a?b=1 by 5pm") == {
+        "bob@example.com": 1,
+        "https://x.io/a?b=1": 1,
+    }
+    assert protected_tokens(EN_QUERY) == {}  # plain numbers are not censused
     literals = argument_literals(EXPECTED, EN_QUERY)
-    assert literals == ["Paris", "2024-05-01"]  # 3 is an int, not a string leaf
-    nested = [{"name": "f", "arguments": {"filters": {"ids": ["ab", "x"]}}}]
-    assert argument_literals(nested, "give me ab and x") == ["ab"]  # "x" is too short
+    assert literals == ["Paris", "2024-05-01", "3"]  # numeric args count, as ASCII digits
+    nested = [{"name": "f", "arguments": {"filters": {"ids": ["ab", "x"], "n": 7, "on": True, "ratio": 2.0}}}]
+    assert argument_literals(nested, "give me ab and x, 7 of them at ratio 2") == ["ab", "7", "2"]
 
 
 def test_ideal_localization_passes() -> None:
@@ -102,9 +105,9 @@ def test_ideal_localization_passes() -> None:
         ("", "empty_localization"),
         (EN_QUERY, "not_localized"),
         ("What is the weather in Paris on 2024-05-01? Use 3 day forecast!", "insufficient_script_ratio:ne-Deva"),
-        ("२०२४-०५-०१ मा Paris को मौसम कस्तो छ? 3 दिनको पूर्वानुमान।", "missing_protected_token:2024-05-01"),
+        ("२०२४-०५-०१ मा Paris को मौसम कस्तो छ? 3 दिनको पूर्वानुमान।", "missing_argument_literal:2024-05-01"),
         ("2024-05-01 मा पेरिस को मौसम कस्तो छ? 3 दिनको पूर्वानुमान।", "missing_argument_literal:Paris"),
-        ("2024-05-01 मा Paris को मौसम कस्तो छ? तीन दिनको पूर्वानुमान।", "missing_protected_token:3"),
+        ("2024-05-01 मा Paris को मौसम कस्तो छ? तीन दिनको पूर्वानुमान।", "missing_argument_literal:3"),
     ],
 )
 def test_localization_gate_rejects(localized: str, expected_reason: str) -> None:
@@ -178,7 +181,7 @@ async def test_failed_localization_rejects_row_without_calling_policy() -> None:
     assert result.metadata["rejection"] == "localization_failed"
     reasons = result.metadata["localization"]["attempts"][0]["issues"]
     assert "missing_argument_literal:Paris" in reasons
-    assert "missing_protected_token:2024-05-01" in reasons
+    assert "missing_argument_literal:2024-05-01" in reasons
     assert env.build_sharegpt_conversations(result, task) is None
 
 
