@@ -220,3 +220,71 @@ async def test_lenient_transport_handles_gzip_encoded_bodies() -> None:
     async with httpx.AsyncClient(transport=_LenientOpenAITransport(httpx.MockTransport(fake))) as client:
         response = await client.post("https://example.test/v1/chat/completions", json={})
     assert response.json()["choices"][0]["message"]["content"] == "ok"
+
+
+@pytest.mark.asyncio
+async def test_transient_errors_are_retried_with_server_delay(monkeypatch) -> None:
+    from pydantic_ai.exceptions import ModelHTTPError
+    from pydantic_ai.messages import ModelResponse, TextPart
+    from pydantic_ai.models.function import FunctionModel
+
+    import gymkhana.core.services.inference.pydantic_ai as mod
+
+    sleeps: list[float] = []
+
+    async def fake_sleep(seconds: float) -> None:
+        sleeps.append(seconds)
+
+    monkeypatch.setattr(mod.asyncio, "sleep", fake_sleep)
+
+    calls = {"n": 0}
+
+    def flaky(messages, info):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise ModelHTTPError(429, "m", body={"error": {"message": "Please retry in 22.2s"}}, headers={})
+        if calls["n"] == 2:
+            raise ModelHTTPError(503, "m", body="overloaded", headers={"Retry-After": "5"})
+        return ModelResponse(parts=[TextPart("ok")])
+
+    service = PydanticAIInferenceService(retry_base_seconds=1.0, retry_max_seconds=60.0)
+    out = await service.generate(messages=[{"role": "user", "content": "hi"}], model=FunctionModel(flaky))
+    assert out == "ok"
+    assert calls["n"] == 3
+    assert sleeps == [22.2, 5.0]  # server-suggested delays win over backoff
+
+
+@pytest.mark.asyncio
+async def test_non_retryable_errors_propagate_immediately(monkeypatch) -> None:
+    from pydantic_ai.exceptions import ModelHTTPError
+    from pydantic_ai.models.function import FunctionModel
+
+    import gymkhana.core.services.inference.pydantic_ai as mod
+
+    monkeypatch.setattr(mod.asyncio, "sleep", lambda s: (_ for _ in ()).throw(AssertionError("should not sleep")))
+    calls = {"n": 0}
+
+    def bad_request(messages, info):
+        calls["n"] += 1
+        raise ModelHTTPError(400, "m", body="bad request")
+
+    service = PydanticAIInferenceService()
+    with pytest.raises(ModelHTTPError):
+        await service.generate(messages=[{"role": "user", "content": "hi"}], model=FunctionModel(bad_request))
+    assert calls["n"] == 1
+
+    # exhausted retries re-raise the last error
+    always = {"n": 0}
+
+    def always_503(messages, info):
+        always["n"] += 1
+        raise ModelHTTPError(503, "m", body="down")
+
+    async def no_sleep(_: float) -> None:
+        return None
+
+    monkeypatch.setattr(mod.asyncio, "sleep", no_sleep)
+    service = PydanticAIInferenceService(max_retries=2)
+    with pytest.raises(ModelHTTPError):
+        await service.generate(messages=[{"role": "user", "content": "hi"}], model=FunctionModel(always_503))
+    assert always["n"] == 3

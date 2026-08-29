@@ -15,6 +15,8 @@ from pydantic import BaseModel, Field
 
 from .base import InferenceService, StructuredOutputT
 
+logger = logging.getLogger(__name__)
+
 
 def normalize_chat_completion(data: Any) -> bool:
     """Coerce off-spec OpenAI-compatible responses in place. Returns True if changed.
@@ -101,6 +103,38 @@ def _thinking_text(messages: Any) -> Optional[str]:
         if isinstance(part, ThinkingPart) and getattr(part, "content", None)
     ]
     return "\n\n".join(chunk.strip() for chunk in chunks if chunk.strip()) or None
+
+
+RETRYABLE_STATUS = {408, 409, 425, 429, 500, 502, 503, 504}
+_RETRY_IN_RE = re.compile(r"retry(?:\s+in|Delay[\"']?\s*:\s*[\"']?)\s*([0-9.]+)\s*s", re.IGNORECASE)
+
+
+def _retry_after_seconds(error: BaseException) -> Optional[float]:
+    """Server-suggested wait: Retry-After header, or Google's retryDelay / "retry in Ns"."""
+    headers = getattr(error, "headers", None) or {}
+    for key, value in headers.items():
+        if key.lower() == "retry-after":
+            try:
+                return max(0.0, float(value))
+            except (TypeError, ValueError):
+                break
+    match = _RETRY_IN_RE.search(str(getattr(error, "body", None) or "") or str(error))
+    if match:
+        try:
+            return float(match.group(1))
+        except ValueError:
+            return None
+    return None
+
+
+def is_retryable(error: BaseException) -> bool:
+    from pydantic_ai.exceptions import ModelAPIError, ModelHTTPError
+
+    if isinstance(error, ModelHTTPError):
+        return error.status_code in RETRYABLE_STATUS
+    if isinstance(error, ModelAPIError):
+        return True  # connection errors, malformed transport responses
+    return isinstance(error, (httpx.TransportError, asyncio.TimeoutError))
 
 
 LITELLM_PREFIX = "litellm:"
@@ -222,6 +256,9 @@ class PydanticAIInferenceService(InferenceService):
     default_temperature: Optional[float] = None
     default_max_tokens: int = 4096
     max_concurrency: int = Field(default=8, ge=1)
+    max_retries: int = Field(default=4, ge=0, description="Retries on 429/5xx/connection errors")
+    retry_base_seconds: float = Field(default=2.0, ge=0.0)
+    retry_max_seconds: float = Field(default=90.0, ge=0.0)
 
     @staticmethod
     def _conversation(messages: List[Dict[str, str]]) -> tuple[str, list[Any]]:
@@ -274,14 +311,35 @@ class PydanticAIInferenceService(InferenceService):
             settings_values["seed"] = kwargs["seed"]
         settings = ModelSettings(**settings_values)
         prompt, history = self._conversation(messages)
-        result = await agent.run(
-            prompt,
-            message_history=history or None,
-            model_settings=settings,
+        result = await self._run_with_retries(
+            lambda: agent.run(prompt, message_history=history or None, model_settings=settings),
+            model_label=str(model or self.default_model),
         )
         content, inline_reasoning = split_think_tags(_serialize_output(result.output))
         reasoning = _thinking_text(result.new_messages()) or inline_reasoning
         return content, reasoning
+
+    async def _run_with_retries(self, attempt: Any, *, model_label: str) -> Any:
+        """Retry transient provider failures, honouring server-suggested delays."""
+        for retry in range(self.max_retries + 1):
+            try:
+                return await attempt()
+            except Exception as error:  # noqa: BLE001 - classified below
+                if retry >= self.max_retries or not is_retryable(error):
+                    raise
+                suggested = _retry_after_seconds(error)
+                backoff = min(self.retry_base_seconds * (2**retry), self.retry_max_seconds)
+                delay = min(max(suggested or 0.0, backoff), self.retry_max_seconds)
+                logger.warning(
+                    "Retrying %s after %s (attempt %s/%s, sleeping %.1fs)",
+                    model_label,
+                    f"{type(error).__name__}: {str(error)[:120]}",
+                    retry + 1,
+                    self.max_retries,
+                    delay,
+                )
+                await asyncio.sleep(delay)
+        raise RuntimeError("unreachable")
 
     async def generate(
         self,
