@@ -11,6 +11,7 @@ from typing import Any, Optional
 from gymkhana.envs.config import LLMJudgeSettings
 from gymkhana.envs.llm_judge import LLMJudge
 
+from .languages import language_issues
 from .models import (
     AnswerType,
     ContextPolicy,
@@ -69,40 +70,26 @@ total_score must equal the four component scores and therefore use the 0–10
 scale. The environment normalizes that total to 0–1 before acceptance.
 """
 
-DEVANAGARI_RE = re.compile(r"[\u0900-\u097f]")
-LETTER_RE = re.compile(r"[^\W\d_]", re.UNICODE)
 NUMBER_RE = re.compile(r"[-+]?\d+(?:[.,]\d+)?")
+BOXED_RE = re.compile(r"\\boxed\{([^{}]*)\}")
+# Single-token multiple-choice labels: a-d, 1-4, or the Devanagari letters क-घ.
+OPTION_LABEL_RE = re.compile(r"(?<!\w)([a-d]|[1-4]|[क-घ])(?!\w)")
 NEPALI_DIGITS = str.maketrans("०१२३४५६७८९", "0123456789")
-ROMANIZED_NEPALI_WORDS = {
-    "chha",
-    "chhan",
-    "cha",
-    "ho",
-    "huncha",
-    "garchha",
-    "garna",
-    "ko",
-    "ka",
-    "ki",
-    "le",
-    "lai",
-    "ma",
-    "ra",
-    "bhaneko",
-    "bhane",
-    "yo",
-    "tyo",
-    "kina",
-    "kasari",
-    "nepal",
-    "nepali",
-    "uttar",
-    "prashna",
-}
+# Common Nepali orthographic variants that should not break exact matching.
+_FOLD = str.maketrans({"ँ": "ं", "\u200c": "", "\u200d": ""})
 
 
 def normalize_text(value: str) -> str:
-    return " ".join(unicodedata.normalize("NFC", value).casefold().split())
+    folded = unicodedata.normalize("NFC", value).translate(_FOLD).casefold()
+    return " ".join(folded.split())
+
+
+def contains_as_token(haystack: str, needle: str) -> bool:
+    """True when ``needle`` appears in ``haystack`` bounded by non-word characters."""
+
+    if not needle:
+        return False
+    return re.search(rf"(?<!\w){re.escape(needle)}(?!\w)", haystack) is not None
 
 
 class QAVerifier:
@@ -119,22 +106,7 @@ class QAVerifier:
         self.inference_service = inference_service
 
     def language_issues(self, text: str) -> list[str]:
-        language = self.settings.target_language
-        if not text.strip():
-            return ["empty_text"]
-        letters = LETTER_RE.findall(text)
-        if language == "ne-Deva":
-            ratio = len(DEVANAGARI_RE.findall(text)) / max(1, len(letters))
-            if ratio < self.settings.min_devanagari_ratio:
-                return [f"insufficient_devanagari_ratio:{ratio:.3f}"]
-        elif language == "ne-Latn":
-            if DEVANAGARI_RE.search(text):
-                return ["unexpected_devanagari_in_romanized_nepali"]
-            words = set(re.findall(r"[A-Za-z]+", text.casefold()))
-            hits = len(words & ROMANIZED_NEPALI_WORDS)
-            if hits < self.settings.min_romanized_nepali_tokens:
-                return [f"insufficient_romanized_nepali_tokens:{hits}"]
-        return []
+        return language_issues(text, self.settings.language_spec)
 
     def validate_draft(
         self,
@@ -185,6 +157,9 @@ class QAVerifier:
     @staticmethod
     def _numbers(text: str) -> list[float]:
         normalized = text.translate(NEPALI_DIGITS)
+        boxed = BOXED_RE.findall(normalized)
+        if boxed:
+            normalized = " ".join(boxed)
         values: list[float] = []
         for match in NUMBER_RE.findall(normalized):
             try:
@@ -198,25 +173,36 @@ class QAVerifier:
     ) -> tuple[float, dict[str, Any]]:
         expected = normalize_text(plan.expected_answer)
         candidate = normalize_text(answer)
+        if plan.verifier == VerifierType.MULTIPLE_CHOICE and len(expected) <= 2:
+            # Short option label: the first label the candidate mentions is its answer,
+            # so "A. Not B." does not match B while "Answer: (B)" does.
+            labels = OPTION_LABEL_RE.findall(candidate)
+            passed = bool(expected) and (candidate == expected or bool(labels) and labels[0] == expected)
+            return float(passed), {"normalized_expected": expected, "candidate_labels": labels}
         if plan.verifier in {VerifierType.EXACT, VerifierType.MULTIPLE_CHOICE}:
-            passed = bool(expected and (candidate == expected or expected in candidate))
+            passed = bool(
+                expected and (candidate == expected or contains_as_token(candidate, expected))
+            )
             return float(passed), {"normalized_expected": expected}
         if plan.verifier == VerifierType.NUMERIC:
             expected_numbers = self._numbers(plan.expected_answer)
             candidate_numbers = self._numbers(answer)
-            passed = bool(expected_numbers and candidate_numbers) and any(
+            # The candidate's final number is treated as its answer; earlier numbers
+            # are working. The reference is canonical, so any of its numbers may match.
+            final_value = candidate_numbers[-1] if candidate_numbers else None
+            passed = final_value is not None and any(
                 math.isclose(
                     expected_value,
-                    candidate_value,
+                    final_value,
                     rel_tol=self.settings.numeric_tolerance,
                     abs_tol=self.settings.numeric_tolerance,
                 )
                 for expected_value in expected_numbers
-                for candidate_value in candidate_numbers
             )
             return float(passed), {
                 "expected_numbers": expected_numbers,
                 "candidate_numbers": candidate_numbers,
+                "candidate_final_number": final_value,
             }
         return 0.0, {}
 

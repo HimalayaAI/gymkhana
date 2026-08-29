@@ -10,10 +10,14 @@ from gymkhana.core.services.inference import InferenceService
 from gymkhana.envs import ENVIRONMENTS
 from gymkhana.envs.config import EnvironmentType
 from gymkhana.envs.multi_turn_qa import (
+    AnswerType,
     ContextPolicy,
     MultiTurnQAEnv,
     PROFILES,
     QAGenerationSettings,
+    QAVerifier,
+    QuestionDraft,
+    VerifierType,
 )
 from gymkhana.envs.multi_turn_qa.profiles import get_profile, select_qa_subcategory
 from gymkhana.envs.multi_turn_qa.sources import SourceLoader
@@ -553,3 +557,136 @@ def test_language_validators_cover_devanagari_and_romanized(tmp_path: Path) -> N
     assert romanized._language_issues("yo uttar nepali bhasama chha.") == []
     assert romanized._language_issues("This answer is English only.")
     assert romanized._language_issues("यो देवनागरी उत्तर हो।")
+
+
+def _plan(verifier: str, expected: str):
+    from gymkhana.envs.multi_turn_qa.models import QATurnPlan
+
+    return QATurnPlan.model_construct(
+        expected_answer=expected,
+        verifier=VerifierType(verifier),
+        answer_type=AnswerType(verifier if verifier != "exact" else "exact"),
+    )
+
+
+def _verifier(tmp_path: Path, **overrides: Any) -> QAVerifier:
+    config = base_config(tmp_path, turns=1)
+    for key, value in overrides.items():
+        setattr(config.generation, key, value)
+    return QAVerifier(settings=config.generation)
+
+
+@pytest.mark.parametrize(
+    ("expected", "candidate", "score"),
+    [
+        ("B", "The answer is A. Not B.", 0.0),
+        ("B", "उत्तर: (B)", 1.0),
+        ("b", "B", 1.0),
+        ("A", "Option B is correct.", 0.0),
+        ("ख", "उत्तर ख हो।", 1.0),
+    ],
+)
+def test_multiple_choice_uses_first_option_label(
+    tmp_path: Path, expected: str, candidate: str, score: float
+) -> None:
+    verifier = _verifier(tmp_path)
+    got, details = verifier._deterministic_score(_plan("multiple_choice", expected), candidate)
+    assert got == score, details
+
+
+@pytest.mark.parametrize(
+    ("expected", "candidate", "score"),
+    [
+        ("हो", "होइन", 0.0),
+        ("हो", "यसको उत्तर हो।", 1.0),
+        ("a", "kathmandu", 0.0),
+        ("काठमाडौँ", "राजधानी काठमाडौं हो", 1.0),
+        ("Kathmandu", "The capital is Kathmandu.", 1.0),
+    ],
+)
+def test_exact_match_requires_token_boundaries_and_folds_nasal_variants(
+    tmp_path: Path, expected: str, candidate: str, score: float
+) -> None:
+    verifier = _verifier(tmp_path)
+    got, _ = verifier._deterministic_score(_plan("exact", expected), candidate)
+    assert got == score
+
+
+@pytest.mark.parametrize(
+    ("expected", "candidate", "score"),
+    [
+        ("1000", "2000 होइन, 1000", 1.0),
+        ("1000", "1000 होइन, 2000", 0.0),
+        ("42", "७ वटा समूह, जम्मा ४२", 1.0),
+        ("42", r"७ र ६ गुणा गर्दा \boxed{४२} हुन्छ, ७ होइन", 1.0),
+        ("42", "no number here", 0.0),
+    ],
+)
+def test_numeric_uses_candidate_final_or_boxed_number(
+    tmp_path: Path, expected: str, candidate: str, score: float
+) -> None:
+    verifier = _verifier(tmp_path)
+    got, details = verifier._deterministic_score(_plan("numeric", expected), candidate)
+    assert got == score, details
+
+
+def test_builtin_language_specs_are_registered() -> None:
+    from gymkhana.envs.multi_turn_qa import BUILTIN_LANGUAGES, resolve_language
+
+    assert set(BUILTIN_LANGUAGES) == {"en", "ne-Deva", "ne-Latn"}
+    assert resolve_language("ne-Latn").context_label == "Sandarbh"
+    with pytest.raises(ValueError, match="unknown target_language"):
+        resolve_language("xx-Zzzz")
+
+
+def test_custom_language_spec_is_config_driven(tmp_path: Path) -> None:
+    from gymkhana.envs.multi_turn_qa import LanguageSpec
+
+    config = base_config(tmp_path, turns=1)
+    with pytest.raises(ValidationError, match="unknown target_language"):
+        config.generation.target_language = "hi-Deva"
+
+    config.generation.languages = {
+        "hi-Deva": LanguageSpec(
+            code="hi-Deva",
+            name="Hindi (Devanagari)",
+            instruction="Write natural Hindi in Devanagari.",
+            context_label="संदर्भ",
+            question_label="प्रश्न",
+            script_regex=r"[ऀ-ॿ]",
+        ),
+        "taj-Latn": LanguageSpec(
+            code="taj-Latn",
+            name="Tamang (Latin)",
+            instruction="Write natural Tamang in Latin script.",
+            forbidden_script_regex=r"[ऀ-ॿ]",
+            marker_words={"la", "se", "ta"},
+            min_marker_words=2,
+        ),
+    }
+    config.generation.target_language = "hi-Deva"
+    env = MultiTurnQAEnv(config=config, records=[])
+    assert env._language_issues("यह उत्तर हिंदी में है।") == []
+    assert env._language_issues("English only.") == ["insufficient_script_ratio:hi-Deva:0.000"]
+    assert "Write natural Hindi" in env._answerer_system(get_profile("general"))
+    rendered = env._render_user_message(
+        QuestionDraft.model_construct(question="प्रश्न?", visible_context="संदर्भ पाठ"),
+        ContextPolicy.INLINE_EXCERPT,
+    )
+    assert rendered.startswith("संदर्भ:\n")
+
+    config.generation.target_language = "taj-Latn"
+    tamang = MultiTurnQAEnv(config=config, records=[])
+    assert tamang._language_issues("nga la se ta.") == []
+    assert tamang._language_issues("यो देवनागरी हो।") == ["forbidden_script:taj-Latn"]
+    assert tamang._language_issues("English only.") == ["insufficient_marker_words:taj-Latn:0"]
+
+
+def test_language_key_must_match_spec_code(tmp_path: Path) -> None:
+    from gymkhana.envs.multi_turn_qa import LanguageSpec
+
+    config = base_config(tmp_path, turns=1)
+    with pytest.raises(ValidationError, match="must equal spec code"):
+        config.generation.languages = {
+            "hi": LanguageSpec(code="hi-Deva", name="Hindi", instruction="x")
+        }

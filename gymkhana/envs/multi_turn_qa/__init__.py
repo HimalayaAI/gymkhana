@@ -1,6 +1,7 @@
 """General single- and multi-turn QA generation environment."""
 
 from .environment import CANONICAL_NAME, MultiTurnQAEnv
+from .languages import BUILTIN_LANGUAGES, LanguageSpec, resolve_language
 from .models import (
     AnswerType,
     ContextPolicy,
@@ -19,6 +20,8 @@ from .verification import QAVerifier
 
 __all__ = [
     "AnswerType",
+    "BUILTIN_LANGUAGES",
+    "LanguageSpec",
     "CANONICAL_NAME",
     "ContextPolicy",
     "ConversationEvaluation",
@@ -35,4 +38,5 @@ __all__ = [
     "TurnEvaluation",
     "VerifierType",
     "get_profile",
+    "resolve_language",
 ]

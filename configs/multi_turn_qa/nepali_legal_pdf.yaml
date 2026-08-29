@@ -1,4 +1,8 @@
 # Source-grounded Nepal legal QA from raw PDF documents.
+#
+# LICENSE NOTE: w4ashabii/nepali_legal_pdf does not advertise a license on the
+# Hub. Exports carry license: null in provenance; complete a license review
+# before redistributing generated data.
 name: multi-turn-qa
 
 dataset:

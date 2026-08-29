@@ -226,7 +226,8 @@ python -m gymkhana.run \
 ```
 
 Use `--qa-turns 1` for single-turn output or choose `en`, `ne-Deva`, or
-`ne-Latn` with `--target-language`. Dataset mappings, context policies,
+`ne-Latn` with `--target-language`; other languages are declared as
+`LanguageSpec` entries under `generation.languages` (see the env README). Dataset mappings, context policies,
 verifier routing, profile extension, and PDF chunk provenance are documented in
 `gymkhana/envs/multi_turn_qa/README.md`.
 

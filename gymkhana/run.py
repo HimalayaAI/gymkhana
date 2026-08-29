@@ -151,9 +151,11 @@ def main():
     )
     parser.add_argument(
         "--target-language",
-        choices=["en", "ne-Deva", "ne-Latn"],
         default=None,
-        help="Target language/script for QA generation",
+        help=(
+            "Target language/script code for QA generation (built-in: en, ne-Deva, "
+            "ne-Latn; more via generation.languages in the config)"
+        ),
     )
     parser.add_argument(
         "--client",

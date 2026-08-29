@@ -9,6 +9,8 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 from gymkhana.envs.config import EnvConfig, InferenceConfig
 
+from .languages import LanguageSpec, resolve_language
+
 
 class ContextPolicy(str, Enum):
     """How information needed by an answer is exposed to the answer agent."""
@@ -50,7 +52,14 @@ class QAGenerationSettings(BaseModel):
     profile: str = "textbook"
     subcategory: str = "auto"
     turns: int = Field(default=3, ge=1, le=8)
-    target_language: Literal["en", "ne-Deva", "ne-Latn"] = "ne-Deva"
+    target_language: str = "ne-Deva"
+    languages: Dict[str, LanguageSpec] = Field(
+        default_factory=dict,
+        description=(
+            "Additional LanguageSpec entries keyed by code. They extend (or override) "
+            "the built-in en / ne-Deva / ne-Latn specs."
+        ),
+    )
     source_language: Optional[str] = None
     source_license: Optional[str] = None
     source_kind: Literal["auto", "text", "pdf"] = "auto"
@@ -77,8 +86,6 @@ class QAGenerationSettings(BaseModel):
     acceptance_threshold: float = Field(default=0.75, ge=0.0, le=1.0)
     judge_deterministic_answers: bool = False
     numeric_tolerance: float = Field(default=1e-6, ge=0.0)
-    min_devanagari_ratio: float = Field(default=0.45, ge=0.0, le=1.0)
-    min_romanized_nepali_tokens: int = Field(default=2, ge=0)
 
     @field_validator("profile")
     @classmethod
@@ -87,6 +94,20 @@ class QAGenerationSettings(BaseModel):
         if not normalized:
             raise ValueError("generation.profile cannot be empty")
         return normalized
+
+    @field_validator("languages")
+    @classmethod
+    def key_languages_by_code(cls, value: Dict[str, LanguageSpec]) -> Dict[str, LanguageSpec]:
+        keyed: Dict[str, LanguageSpec] = {}
+        for key, spec in value.items():
+            if spec.code != key.strip():
+                raise ValueError(f"languages key {key!r} must equal spec code {spec.code!r}")
+            keyed[spec.code] = spec
+        return keyed
+
+    @property
+    def language_spec(self) -> LanguageSpec:
+        return resolve_language(self.target_language, self.languages)
 
     @field_validator("difficulty_profile")
     @classmethod
@@ -98,6 +119,7 @@ class QAGenerationSettings(BaseModel):
 
     @model_validator(mode="after")
     def validate_chunking_and_mix(self) -> "QAGenerationSettings":
+        resolve_language(self.target_language, self.languages)
         if self.chunk_overlap_chars >= self.chunk_size_chars:
             raise ValueError("chunk_overlap_chars must be smaller than chunk_size_chars")
         invalid = [key for key, weight in self.context_mix.items() if weight < 0]

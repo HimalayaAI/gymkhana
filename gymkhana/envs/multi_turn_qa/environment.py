@@ -77,20 +77,6 @@ def _parse_json_object(raw: str) -> dict[str, Any]:
     return parsed
 
 
-def _language_instruction(language: str) -> str:
-    if language == "ne-Deva":
-        return (
-            "Write natural Nepali in Devanagari. Preserve numbers, formulas, units, "
-            "URLs, code, and necessary technical Latin terms."
-        )
-    if language == "ne-Latn":
-        return (
-            "Write natural romanized Nepali in Latin script, not English translation. "
-            "Use one consistent romanization style and preserve technical tokens."
-        )
-    return "Write clear natural English."
-
-
 @register_environment(name=CANONICAL_NAME, env_type=CANONICAL_NAME)
 class MultiTurnQAEnv(Environment):
     """Generate visible-context-safe QA conversations with two model roles."""
@@ -340,7 +326,8 @@ class MultiTurnQAEnv(Environment):
         return (
             f"Generate turn {turn_index + 1} of {self.qa_config.generation.turns}.\n"
             f"Difficulty: {difficulty}\nSubcategory: {subcategory}\n"
-            f"Source language: {source_language}\nTarget language: {target_language}\n"
+            f"Source language: {source_language}\nTarget language: {target_language} "
+            f"({self.qa_config.generation.language_spec.name})\n"
             f"Required context policy: {policy.value}\n{policy_rules}\n{answer_guidance}\n\n"
             f"SOURCE METADATA:\n{json.dumps(source_metadata, ensure_ascii=False)}\n\n"
             "PRIVATE SOURCE (never reveal more than the required visible excerpt):\n"
@@ -356,17 +343,13 @@ class MultiTurnQAEnv(Environment):
         return QUESTIONER_SYSTEM_TEMPLATE.format(
             profile=profile.name,
             description=profile.description,
-            language_instruction=_language_instruction(
-                self.qa_config.generation.target_language
-            ),
+            language_instruction=self.qa_config.generation.language_spec.instruction,
             profile_instructions=profile.questioner_instructions,
         )
 
     def _answerer_system(self, profile: DomainProfile) -> str:
         return ANSWERER_SYSTEM_TEMPLATE.format(
-            language_instruction=_language_instruction(
-                self.qa_config.generation.target_language
-            ),
+            language_instruction=self.qa_config.generation.language_spec.instruction,
             profile_instructions=profile.answerer_instructions,
         )
 
@@ -385,11 +368,11 @@ class MultiTurnQAEnv(Environment):
     def _render_user_message(self, draft: QuestionDraft, policy: ContextPolicy) -> str:
         if policy != ContextPolicy.INLINE_EXCERPT:
             return draft.question
-        if self.qa_config.generation.target_language == "en":
-            return f"Context:\n{draft.visible_context}\n\nQuestion:\n{draft.question}"
-        if self.qa_config.generation.target_language == "ne-Latn":
-            return f"Sandarbh:\n{draft.visible_context}\n\nPrashna:\n{draft.question}"
-        return f"सन्दर्भ:\n{draft.visible_context}\n\nप्रश्न:\n{draft.question}"
+        spec = self.qa_config.generation.language_spec
+        return (
+            f"{spec.context_label}:\n{draft.visible_context}\n\n"
+            f"{spec.question_label}:\n{draft.question}"
+        )
 
     async def _generate_question(
         self,

@@ -428,7 +428,7 @@ class SourceLoader:
                     text=text,
                     source=source_name,
                     title=title,
-                    language=self.config.generation.source_language or "ne",
+                    language=self.config.generation.source_language,
                     license=self.config.generation.source_license,
                     jurisdiction=profile.jurisdiction,
                     document_date=document_date,

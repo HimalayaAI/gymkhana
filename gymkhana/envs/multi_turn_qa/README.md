@@ -65,6 +65,43 @@ Use `--qa-turns 1` for a single-turn preview, `--target-language ne-Latn` for
 Romanized Nepali, and `--questioner-model`, `--model`, and `--judge-model` to
 configure the three model roles independently.
 
+The legal dataset (`w4ashabii/nepali_legal_pdf`) does not advertise a license on
+the Hub; exports carry `license: null` in provenance and need a separate license
+review before redistribution.
+
+## Adding a target language
+
+Language behaviour is data, not code. `en`, `ne-Deva`, and `ne-Latn` are built in
+(`languages.py`); declare more under `generation.languages` and select one with
+`generation.target_language` or `--target-language`:
+
+```yaml
+generation:
+  target_language: mai-Deva
+  languages:
+    mai-Deva:
+      code: mai-Deva
+      name: Maithili (Devanagari)
+      instruction: Write natural Maithili in Devanagari. Preserve numbers, units, and technical terms.
+      context_label: सन्दर्भ
+      question_label: प्रश्न
+      script_regex: "[\u0900-\u097f]"   # ≥ min_script_ratio of letters must match
+      min_script_ratio: 0.45
+    taj-Latn:
+      code: taj-Latn
+      name: Tamang (Latin)
+      instruction: Write natural Tamang in Latin script.
+      forbidden_script_regex: "[\u0900-\u097f]"
+      marker_words: [la, se, ta, hin, mu]  # ≥ min_marker_words distinct hits required
+      min_marker_words: 2
+```
+
+A spec drives the questioner/answerer prompt instruction, the `Context:` /
+`Question:` labels of inline-excerpt turns, and the deterministic language gate
+applied to every generated question, visible context, and answer. Script-ratio
+checks cannot distinguish languages that share a script (Hindi vs Nepali vs
+Maithili); use the LLM judge rubric or a language-ID model for that.
+
 ## Onboarding another dataset
 
 Copy `configs/multi_turn_qa/domain_template.yaml`, choose a profile, and map the
