@@ -21,7 +21,7 @@ localizer_llm:
 
 localization:
   target_language: ne-Latn
-  max_attempts: 1
+  max_attempts: 2   # one retry: models often default to Devanagari for Nepali
 
 dataset:
   dataset_name: NousResearch/hermes-function-calling-v1

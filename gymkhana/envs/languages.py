@@ -103,8 +103,11 @@ BUILTIN_LANGUAGES: Dict[str, LanguageSpec] = {
             code="ne-Latn",
             name="Nepali (romanized)",
             instruction=(
-                "Write natural romanized Nepali in Latin script, not English translation. "
-                "Use one consistent romanization style and preserve technical tokens."
+                "Write natural Nepali transliterated into the Latin alphabet (romanized "
+                "Nepali / 'Neplish', e.g. 'malai yo kaam garna parcha'). Never use "
+                "Devanagari characters — every character must be Latin. This is Nepali "
+                "written in Latin letters, not an English translation. Use one "
+                "consistent romanization style and preserve technical tokens."
             ),
             context_label="Sandarbh",
             question_label="Prashna",
