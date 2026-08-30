@@ -290,6 +290,21 @@ class DatasetSettings(BaseModel):
     output_basename: str = "sharegpt"
     output_sharegpt: bool = True
     output_audit_jsonl: bool = True
+    incremental_export: bool = Field(
+        default=True,
+        description=(
+            "Append each task's rows to the export and audit files as it finishes, "
+            "instead of writing everything once at the end. Long runs then survive "
+            "interruption. Set False for the legacy write-once behaviour."
+        ),
+    )
+    resume: bool = Field(
+        default=True,
+        description=(
+            "With incremental_export, skip tasks already present in the audit file "
+            "and append to it, so an interrupted run continues where it stopped."
+        ),
+    )
     mask_observations: bool = False
     enable_rewards: bool = True
     reward_function: str = "simple"
