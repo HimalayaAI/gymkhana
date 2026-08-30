@@ -354,7 +354,7 @@ class PythonSandbox:
 
         # Return raw text if requested or for line-limited reads
         if raw or lines is not None:
-            content = filepath.read_text()
+            content = filepath.read_text(encoding="utf-8")
             if lines:
                 content_lines = content.split('\n')
                 content = '\n'.join(content_lines[-lines:])
@@ -363,7 +363,7 @@ class PythonSandbox:
         # Auto-detect and parse based on extension
         if ext == '.json':
             import json
-            return json.loads(filepath.read_text())
+            return json.loads(filepath.read_text(encoding="utf-8"))
 
         elif ext == '.csv':
             pd = self._namespace.get('pd')
@@ -379,7 +379,7 @@ class PythonSandbox:
 
         else:
             # Default: return as text
-            return filepath.read_text()
+            return filepath.read_text(encoding="utf-8")
 
     def _list_files(self, pattern: str = "*") -> List[str]:
         """List files in workspace matching pattern."""
@@ -409,7 +409,7 @@ class PythonSandbox:
             raise FileNotFoundError(f"File not found: {filename}")
 
         stat = filepath.stat()
-        content = filepath.read_text()
+        content = filepath.read_text(encoding="utf-8")
         lines = content.count('\n') + 1 if content else 0
 
         # Detect file type from extension
@@ -460,7 +460,7 @@ class PythonSandbox:
                 continue
 
             try:
-                content = filepath.read_text()
+                content = filepath.read_text(encoding="utf-8")
                 for i, line in enumerate(content.split('\n'), 1):
                     if regex.search(line):
                         results.append({
