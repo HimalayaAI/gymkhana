@@ -80,13 +80,22 @@ def create_repo_rest(repo: str, *, token: str, private: bool) -> None:
     print(f"[push] created {repo}")
 
 
-def commit_files_rest(repo: str, *, token: str, files: Dict[str, bytes], summary: str) -> None:
+def commit_files_rest(
+    repo: str,
+    *,
+    token: str,
+    files: Dict[str, bytes],
+    summary: str,
+    delete: Optional[List[str]] = None,
+) -> None:
     """Single commit over the Hub's NDJSON commit endpoint (no LFS, no xet)."""
     import base64
 
     import requests
 
     lines = [json.dumps({"key": "header", "value": {"summary": summary, "description": ""}})]
+    for path in delete or []:
+        lines.append(json.dumps({"key": "deletedFile", "value": {"path": path}}))
     for path, blob in files.items():
         lines.append(
             json.dumps(
@@ -131,6 +140,25 @@ def flatten(row: Dict[str, Any]) -> Dict[str, Any]:
     return ordered
 
 
+def align_columns(splits: Dict[str, List[Dict[str, Any]]]) -> None:
+    """Give every row the same keys, in the same order, filling gaps with None.
+
+    Exports written before and after a metadata change carry different columns;
+    the Hub infers features from the first split and fails to cast the rest
+    ("column names don't match"). Aligning up front keeps the splits castable.
+    """
+    ordered: List[str] = []
+    for rows in splits.values():
+        for row in rows:
+            for key in row:
+                if key not in ordered:
+                    ordered.append(key)
+    lead = [c for c in LEADING_COLUMNS if c in ordered]
+    ordered = lead + [c for c in ordered if c not in lead]
+    for split, rows in splits.items():
+        splits[split] = [{key: row.get(key) for key in ordered} for row in rows]
+
+
 def merge(paths: Iterable[Path]) -> List[Dict[str, Any]]:
     """Merge exports, keeping the first row per (id, target_language).
 
@@ -149,8 +177,17 @@ def merge(paths: Iterable[Path]) -> List[Dict[str, Any]]:
     return list(rows.values())
 
 
-def build_card(*, repo: str, rows: List[Dict[str, Any]], args: argparse.Namespace) -> str:
+def build_card(
+    *, repo: str, rows: List[Dict[str, Any]], splits: Dict[str, List[Dict[str, Any]]], args: argparse.Namespace
+) -> str:
     columns = sorted({k for row in rows for k in row})
+    split_yaml = "\n".join(
+        f"      - split: {split}\n        path: data/{split}.jsonl" for split in splits
+    )
+    configs_block = (
+        "configs:\n  - config_name: default\n    data_files:\n" + split_yaml + "\n"
+    )
+    split_lines = "\n".join(f"- `{split}`: {len(r)} rows" for split, r in splits.items())
     size = "n<1K" if len(rows) < 1000 else "1K<n<10K" if len(rows) < 10000 else "10K<n<100K"
     languages = "\n".join(f"- {lang}" for lang in args.language)
     tags = "\n".join(f"- {tag}" for tag in args.tag)
@@ -162,7 +199,7 @@ def build_card(*, repo: str, rows: List[Dict[str, Any]], args: argparse.Namespac
     description = args.description or ""
     column_lines = "\n".join(f"| `{c}` | |" for c in columns)
     return f"""---
-license: {args.license}
+{configs_block}license: {args.license}
 language:
 {languages}
 task_categories:
@@ -194,6 +231,10 @@ Only rows that passed the environment's verifier are included.
 `conversations` is a list of `{{"from": "system|human|gpt|tool", "value": "..."}}`;
 `tools` and `expected_tool_calls` are JSON strings.
 
+## Splits
+
+{split_lines}
+
 ## Stats
 
 - rows: {len(rows)}
@@ -203,7 +244,12 @@ Only rows that passed the environment's verifier are included.
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--input", action="append", required=True, type=Path, help="export jsonl (repeatable)")
+    parser.add_argument(
+        "--input",
+        action="append",
+        required=True,
+        help="export jsonl (repeatable); prefix with 'split=' to target a split, e.g. train_latn=path.jsonl",
+    )
     parser.add_argument("--repo", required=True, help="owner/name on the Hub")
     parser.add_argument("--private", action="store_true")
     parser.add_argument("--environment", default="gymkhana")
@@ -220,14 +266,29 @@ def main() -> None:
         help="push parquet with datasets.push_to_hub instead of committing the jsonl (uses hf_xet)",
     )
     parser.add_argument("--hf-token", default=None, help="defaults to $HF_TOKEN, then the cached login")
+    parser.add_argument(
+        "--delete-path",
+        action="append",
+        default=None,
+        help="repo path to delete in the same commit (repeatable), e.g. stale data/train.jsonl",
+    )
     parser.add_argument("--out", type=Path, default=None, help="also write the merged jsonl here")
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
     args.language = args.language or ["ne", "en"]
     args.tag = args.tag or ["sharegpt", "hermes", "synthetic"]
 
-    rows = merge(args.input)
-    print(f"merged rows: {len(rows)} from {len(args.input)} file(s)")
+    # Group inputs by split: "split=path" targets that split, bare paths the default.
+    by_split: Dict[str, List[Path]] = {}
+    for item in args.input:
+        split, sep, path = str(item).partition("=")
+        by_split.setdefault(split if sep else args.split, []).append(Path(path if sep else item))
+
+    splits = {split: merge(paths) for split, paths in by_split.items()}
+    align_columns(splits)
+    rows = [row for split_rows in splits.values() for row in split_rows]
+    for split, split_rows in splits.items():
+        print(f"merged rows: {len(split_rows)} -> split '{split}' from {len(by_split[split])} file(s)")
     print("columns:", list(rows[0]) if rows else [])
     if args.out:
         with args.out.open("w", encoding="utf-8") as handle:
@@ -235,13 +296,18 @@ def main() -> None:
                 handle.write(json.dumps(row, ensure_ascii=False) + "\n")
         print(f"wrote {args.out}")
 
-    card = build_card(repo=args.repo, rows=rows, args=args)
+    card = build_card(repo=args.repo, rows=rows, splits=splits, args=args)
     if args.dry_run:
         print(card)
         return
 
     token = resolve_token(args.hf_token)
-    payload = "".join(json.dumps(row, ensure_ascii=False) + "\n" for row in rows)
+    payloads = {
+        f"data/{split}.jsonl": "".join(
+            json.dumps(row, ensure_ascii=False) + "\n" for row in split_rows
+        ).encode("utf-8")
+        for split, split_rows in splits.items()
+    }
 
     if args.via_datasets:
         # Parquet layout via `datasets` (like the MarketDataGenie uploaders).
@@ -253,10 +319,15 @@ def main() -> None:
         from huggingface_hub import HfApi
 
         with tempfile.TemporaryDirectory() as tmpdir:
-            staged = Path(tmpdir) / f"{args.split}.jsonl"
-            staged.write_text(payload, encoding="utf-8")
+            data_files = {}
+            for split, split_rows in splits.items():
+                staged = Path(tmpdir) / f"{split}.jsonl"
+                staged.write_text(
+                    "".join(json.dumps(r, ensure_ascii=False) + "\n" for r in split_rows), encoding="utf-8"
+                )
+                data_files[split] = str(staged)
             print(f"[push] datasets.push_to_hub -> {args.repo} (private={args.private})")
-            load_dataset("json", data_files={args.split: str(staged)}).push_to_hub(
+            load_dataset("json", data_files=data_files).push_to_hub(
                 args.repo, token=token, private=args.private
             )
         HfApi().upload_file(
@@ -275,8 +346,9 @@ def main() -> None:
         commit_files_rest(
             args.repo,
             token=token,
-            files={f"data/{args.split}.jsonl": payload.encode("utf-8"), "README.md": card.encode("utf-8")},
-            summary=f"Upload {len(rows)} rows",
+            files={**payloads, "README.md": card.encode("utf-8")},
+            summary=f"Upload {len(rows)} rows across {len(splits)} split(s)",
+            delete=[p for p in (args.delete_path or []) if p not in payloads],
         )
     print(f"pushed {len(rows)} rows to https://huggingface.co/datasets/{args.repo}")
 
