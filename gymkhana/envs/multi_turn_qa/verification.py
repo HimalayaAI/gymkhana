@@ -141,6 +141,12 @@ class QAVerifier:
                 issues.append("evidence_not_found_in_source")
         elif draft.visible_context:
             issues.append("unexpected_visible_context")
+        if (
+            draft.answer_type == AnswerType.SOURCE_GROUNDED
+            and policy != ContextPolicy.INLINE_EXCERPT
+            and not draft.evidence
+        ):
+            issues.append("missing_source_evidence")
         if policy == ContextPolicy.CONVERSATION_GROUNDED and draft.standalone:
             issues.append("followup_incorrectly_marked_standalone")
         if policy != ContextPolicy.CONVERSATION_GROUNDED and not draft.standalone:
