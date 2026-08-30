@@ -64,7 +64,8 @@ SOURCE = (
 def question_draft(
     *,
     question: str,
-    reference_answer: str,
+    reference_answer: Optional[str] = None,
+    rubric: Optional[List[str]] = None,
     subcategory: str,
     visible_context: str = "",
     evidence: Optional[List[str]] = None,
@@ -77,6 +78,7 @@ def question_draft(
             "question": question,
             "visible_context": visible_context,
             "reference_answer": reference_answer,
+            "rubric": rubric or [],
             "answer_type": answer_type,
             "verifier": verifier,
             "evidence": evidence or [],
@@ -397,6 +399,48 @@ async def test_two_agent_multiturn_run_exports_only_visible_context(tmp_path: Pa
         "PRIVATE_MARKER"
     )
     assert len(audit_row["result_metadata"]["question_plans"]) == 2
+
+
+@pytest.mark.asyncio
+async def test_rubric_criteria_reach_judge_prompt(tmp_path: Path) -> None:
+    excerpt = "नियम १ अनुसार निवेदन सम्बन्धित कार्यालयमा पेस गर्नुपर्छ।"
+    responses = [
+        question_draft(
+            question="निवेदन प्रक्रिया कस्तो हुनुपर्छ भनी व्याख्या गर्नुहोस्।",
+            reference_answer=None,
+            rubric=[
+                "उल्लेख गर्नुपर्ने कार्यालयको नाम",
+                "प्रक्रियागत चरणहरूको स्पष्टता",
+            ],
+            subcategory="definitions",
+            visible_context=excerpt,
+            evidence=[excerpt],
+            answer_type="rubric",
+            verifier="rubric",
+        ),
+        "निवेदन सम्बन्धित कार्यालयमा पेस गर्नुपर्छ र आवश्यक कागजात संलग्न गर्नुपर्छ।",
+        JUDGE_PASS,
+    ]
+    inference = ScriptedInference(responses=responses)
+    config = base_config(tmp_path, turns=1)
+    env = MultiTurnQAEnv(
+        config=config,
+        records=[{"id": "rubric-1", "text": SOURCE + excerpt}],
+        services=ServiceContainer(inference=inference),
+    )
+
+    summary = await env.run()
+
+    judge_calls = [
+        call
+        for call in inference.calls
+        if call["system_prompt"]
+        == "You are a precise evaluation judge. Follow the output format exactly."
+    ]
+    assert len(judge_calls) == 1
+    judge_prompt = judge_calls[0]["messages"][0]["content"]
+    assert "उल्लेख गर्नुपर्ने कार्यालयको नाम" in judge_prompt
+    assert "प्रक्रियागत चरणहरूको स्पष्टता" in judge_prompt
 
 
 @pytest.mark.asyncio

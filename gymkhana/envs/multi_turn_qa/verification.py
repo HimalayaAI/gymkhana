@@ -51,6 +51,9 @@ Candidate answer:
 Private reference answer:
 {reference}
 
+Grading criteria (required for rubric-graded turns; may be "(none supplied)" otherwise):
+{rubric_criteria}
+
 Visible conversation available to the answer agent:
 {visible_context}
 
@@ -248,6 +251,10 @@ class QAVerifier:
                     reference=plan.reference_answer or "(no reference answer provided - verify against visible context and evidence)",
                     inference_service=self.inference_service,
                     extra_context={
+                        "rubric_criteria": (
+                            "\n".join(f"- {c}" for c in plan.rubric)
+                            or "(none supplied)"
+                        ),
                         "profile": profile.name,
                         "profile_instructions": (
                             "Questioner rules:\n"
