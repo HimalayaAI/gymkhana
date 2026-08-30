@@ -155,8 +155,24 @@ def align_columns(splits: Dict[str, List[Dict[str, Any]]]) -> None:
                     ordered.append(key)
     lead = [c for c in LEADING_COLUMNS if c in ordered]
     ordered = lead + [c for c in ordered if c not in lead]
+
+    # A column that is null for every row of a split is typed `null` by Arrow, and
+    # casting another split's strings to `null` fails. Fill gaps in string columns
+    # with "" so the column keeps one type across splits.
+    string_columns = {
+        key
+        for key in ordered
+        if any(isinstance(row.get(key), str) for rows in splits.values() for row in rows)
+    }
+
+    def fill(row: Dict[str, Any], key: str) -> Any:
+        value = row.get(key)
+        if value is None and key in string_columns:
+            return ""
+        return value
+
     for split, rows in splits.items():
-        splits[split] = [{key: row.get(key) for key in ordered} for row in rows]
+        splits[split] = [{key: fill(row, key) for key in ordered} for row in rows]
 
 
 def merge(paths: Iterable[Path]) -> List[Dict[str, Any]]:
@@ -267,6 +283,16 @@ def main() -> None:
     )
     parser.add_argument("--hf-token", default=None, help="defaults to $HF_TOKEN, then the cached login")
     parser.add_argument(
+        "--fill",
+        action="append",
+        default=None,
+        metavar="COLUMN=VALUE",
+        help=(
+            "backfill a column where it is missing/empty (repeatable). Use for fields "
+            "added between runs, e.g. --fill localizer_model=litellm:openai/gpt-5.6-luna-pro"
+        ),
+    )
+    parser.add_argument(
         "--delete-path",
         action="append",
         default=None,
@@ -285,6 +311,12 @@ def main() -> None:
         by_split.setdefault(split if sep else args.split, []).append(Path(path if sep else item))
 
     splits = {split: merge(paths) for split, paths in by_split.items()}
+    for assignment in args.fill or []:
+        column, _, value = assignment.partition("=")
+        for rows in splits.values():
+            for row in rows:
+                if not row.get(column):
+                    row[column] = value
     align_columns(splits)
     rows = [row for split_rows in splits.values() for row in split_rows]
     for split, split_rows in splits.items():
