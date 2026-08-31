@@ -12,12 +12,13 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import re
 from abc import ABC, abstractmethod
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, AsyncIterator, Callable, Dict, List, Optional, Sequence, Tuple, Type, TypeVar, Union
+from typing import Any, AsyncIterator, Awaitable, Callable, Dict, List, Optional, Sequence, Tuple, Type, TypeVar, Union
 
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
 
@@ -217,6 +218,70 @@ ENVIRONMENTS = EnvironmentRegistry()
 def get_environment(identifier: str) -> Type[Environment]:
     """Convenience wrapper around the global environment registry."""
     return ENVIRONMENTS.get(identifier)
+
+
+
+class IncrementalExporter:
+    """Append export/audit rows as each task finishes so a run can be interrupted.
+
+    Every line is flushed and fsynced on write, so whatever finished before a
+    crash or Ctrl-C is on disk and the run can be resumed (see
+    ``Environment.completed_task_ids``).
+    """
+
+    def __init__(
+        self,
+        *,
+        sharegpt_path: Path,
+        audit_path: Optional[Path],
+        append: bool,
+    ) -> None:
+        mode = "a" if append else "w"
+        self.sharegpt_path = sharegpt_path
+        self.audit_path = audit_path
+        self._dataset_handle = sharegpt_path.open(mode, encoding="utf-8")
+        self._audit_handle = audit_path.open(mode, encoding="utf-8") if audit_path else None
+        self._lock = asyncio.Lock()
+        self.accepted = 0
+        self.rejected = 0
+        self.errors = 0
+        self.rewards: List[float] = []
+
+    @staticmethod
+    def _write_line(handle, payload: Dict[str, Any]) -> None:
+        handle.write(json.dumps(payload, ensure_ascii=False, default=str) + "\n")
+        handle.flush()
+        os.fsync(handle.fileno())
+
+    async def write(
+        self,
+        record: Optional[Dict[str, Any]],
+        audit_record: Dict[str, Any],
+        *,
+        accepted: bool,
+        reward: Optional[float],
+        errored: bool,
+    ) -> None:
+        async with self._lock:
+            if errored:
+                self.errors += 1
+            elif reward is not None:
+                self.rewards.append(reward)
+            if accepted:
+                self.accepted += 1
+                self._write_line(self._dataset_handle, record or {})
+            else:
+                self.rejected += 1
+            if self._audit_handle is not None:
+                self._write_line(self._audit_handle, audit_record)
+
+    def close(self) -> Dict[str, str]:
+        self._dataset_handle.close()
+        artifacts = {"sharegpt_jsonl": str(self.sharegpt_path)}
+        if self._audit_handle is not None:
+            self._audit_handle.close()
+            artifacts["audit_jsonl"] = str(self.audit_path)
+        return artifacts
 
 
 class Environment(BaseModel, ABC):
@@ -749,24 +814,142 @@ class Environment(BaseModel, ABC):
             return result.answer_correct is not False
         return result.total_reward > 0.5
 
-    def _write_local_artifacts(
-        self,
-        tasks: Sequence[Task],
-        results: Sequence[Optional[TrajectoryResult]],
-    ) -> tuple[Dict[str, str], int, int]:
-        """Atomically write accepted ShareGPT rows, audit rows, and a summary."""
-        if not self.config.dataset.output_sharegpt:
-            return {}, 0, 0
+    # ------------------------------------------------------------------
+    # Local export
+    # ------------------------------------------------------------------
+    def _open_incremental_export(self, tasks: Sequence[Task]) -> Optional["IncrementalExporter"]:
+        """Open an append-as-you-go exporter, or None when disabled."""
+        if not (self.config.dataset.output_sharegpt and self.config.dataset.incremental_export):
+            return None
+        sharegpt_path, audit_path, _ = self._export_paths()
+        return IncrementalExporter(
+            sharegpt_path=sharegpt_path,
+            audit_path=audit_path if self.config.dataset.output_audit_jsonl else None,
+            append=self.config.dataset.resume,
+        )
 
+    def _export_paths(self) -> tuple[Path, Path, Path]:
         output_dir = Path(self.config.dataset.output_dir).expanduser().resolve()
         output_dir.mkdir(parents=True, exist_ok=True)
         basename = self.config.dataset.output_basename.strip()
         if not basename or Path(basename).name != basename:
             raise ValueError("dataset.output_basename must be a plain filename stem")
+        return (
+            output_dir / f"{basename}.jsonl",
+            output_dir / f"{basename}_audit.jsonl",
+            output_dir / f"{basename}_summary.json",
+        )
 
-        sharegpt_path = output_dir / f"{basename}.jsonl"
-        audit_path = output_dir / f"{basename}_audit.jsonl"
-        summary_path = output_dir / f"{basename}_summary.json"
+    def _build_export_records(
+        self, task: Task, result: Optional[TrajectoryResult]
+    ) -> tuple[Optional[Dict[str, Any]], Dict[str, Any], bool]:
+        """Return ``(sharegpt_record | None, audit_record, accepted)`` for one task."""
+        conversations = None
+        export_error = None
+        if result is not None and self.should_export_sharegpt(result, task):
+            try:
+                conversations = self.build_sharegpt_conversations(result, task)
+            except Exception as error:  # pragma: no cover - defensive
+                export_error = f"{type(error).__name__}: {error}"
+                logger.exception("ShareGPT builder failed for task %s", task.id)
+
+        accepted = bool(conversations and len(conversations) > 1)
+        record = None
+        if accepted:
+            record = {"id": task.id, "conversations": conversations}
+            record.update(self.build_sharegpt_metadata(result, task))  # type: ignore[arg-type]
+
+        result_metadata = result.metadata if result is not None else {}
+        audit_record = {
+            "id": task.id,
+            "accepted": accepted,
+            # No result at all: the task raised or was interrupted. Recorded for the
+            # audit trail, but never treated as completed when resuming.
+            "errored": result is None,
+            "reward": float(result.total_reward or 0.0) if result is not None else None,
+            "answer_correct": result.answer_correct if result is not None else None,
+            "source_conversations": task.metadata.get("source_conversations"),
+            "translated_conversations": conversations,
+            "raw_model_output": result.final_answer if result is not None else None,
+            "source_provenance": task.metadata.get("source_provenance", {}),
+            "input_format": task.metadata.get("input_format"),
+            "translation_evaluation": result_metadata.get("translation_evaluation"),
+            "translation_semantic_evaluation": result_metadata.get(
+                "translation_semantic_evaluation"
+            ),
+            "result_metadata": result_metadata,
+            "error": export_error,
+        }
+        return record, audit_record, accepted
+
+    def completed_task_ids(self) -> set:
+        """Task ids already recorded in the audit file (for resuming a run)."""
+        if not (self.config.dataset.output_sharegpt and self.config.dataset.output_audit_jsonl):
+            return set()
+        _, audit_path, _ = self._export_paths()
+        if not audit_path.exists():
+            return set()
+        done = set()
+        with audit_path.open("r", encoding="utf-8") as handle:
+            for line in handle:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    row = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if row.get("errored"):
+                    continue  # retry tasks that crashed or were interrupted
+                if "id" in row:
+                    done.add(str(row["id"]))
+        return done
+
+    def _write_summary(
+        self,
+        *,
+        processed: int,
+        accepted: int,
+        rejected: int,
+        errors: int,
+        rewards: Sequence[float],
+        artifacts: Dict[str, str],
+    ) -> None:
+        _, _, summary_path = self._export_paths()
+        payload = {
+            "environment": self.name,
+            "dataset_name": self.config.dataset.dataset_name,
+            "dataset_split": self.config.dataset.dataset_split,
+            "dataset_offset": self.config.dataset.dataset_offset,
+            "processed": processed,
+            "accepted": accepted,
+            "rejected": rejected,
+            "errors": errors,
+            "acceptance_rate": accepted / processed if processed else 0.0,
+            "mean_reward": sum(rewards) / len(rewards) if rewards else 0.0,
+            "model": self.config.get_llm_config().model,
+            "judge_model": self.config.llm_judge.model if self.config.llm_judge else None,
+            "artifacts": artifacts,
+        }
+        summary_path.write_text(
+            json.dumps(payload, ensure_ascii=False, indent=2, default=str) + "\n",
+            encoding="utf-8",
+        )
+
+    def _write_local_artifacts(
+        self,
+        tasks: Sequence[Task],
+        results: Sequence[Optional[TrajectoryResult]],
+    ) -> tuple[Dict[str, str], int, int]:
+        """Atomically write accepted ShareGPT rows, audit rows, and a summary.
+
+        Used when ``dataset.incremental_export`` is off; the incremental path
+        writes the same records as each task finishes (see ``IncrementalExporter``).
+        """
+        if not self.config.dataset.output_sharegpt:
+            return {}, 0, 0
+
+        sharegpt_path, audit_path, summary_path = self._export_paths()
         sharegpt_tmp = sharegpt_path.with_suffix(".jsonl.tmp")
         audit_tmp = audit_path.with_suffix(".jsonl.tmp")
 
@@ -782,79 +965,21 @@ class Environment(BaseModel, ABC):
         try:
             with sharegpt_tmp.open("w", encoding="utf-8") as dataset_handle:
                 for task, result in zip(tasks, results):
-                    conversations = None
-                    export_error = None
                     if result is None:
                         errors += 1
                     else:
                         rewards.append(float(result.total_reward or 0.0))
-                        if self.should_export_sharegpt(result, task):
-                            try:
-                                conversations = self.build_sharegpt_conversations(
-                                    result, task
-                                )
-                            except Exception as error:  # pragma: no cover
-                                export_error = f"{type(error).__name__}: {error}"
-                                logger.exception(
-                                    "ShareGPT builder failed for task %s", task.id
-                                )
-
-                    is_accepted = bool(conversations and len(conversations) > 1)
+                    record, audit_record, is_accepted = self._build_export_records(task, result)
                     if is_accepted:
                         accepted += 1
-                        record = {
-                            "id": task.id,
-                            "conversations": conversations,
-                        }
-                        record.update(
-                            self.build_sharegpt_metadata(result, task)  # type: ignore[arg-type]
-                        )
                         dataset_handle.write(
                             json.dumps(record, ensure_ascii=False, default=str) + "\n"
                         )
                     else:
                         rejected += 1
-
                     if audit_handle is not None:
-                        result_metadata = result.metadata if result is not None else {}
-                        audit_record = {
-                            "id": task.id,
-                            "accepted": is_accepted,
-                            "reward": (
-                                float(result.total_reward or 0.0)
-                                if result is not None
-                                else None
-                            ),
-                            "answer_correct": (
-                                result.answer_correct if result is not None else None
-                            ),
-                            "source_conversations": task.metadata.get(
-                                "source_conversations"
-                            ),
-                            "translated_conversations": conversations,
-                            "raw_model_output": (
-                                result.final_answer if result is not None else None
-                            ),
-                            "source_provenance": task.metadata.get(
-                                "source_provenance", {}
-                            ),
-                            "input_format": task.metadata.get("input_format"),
-                            "translation_evaluation": result_metadata.get(
-                                "translation_evaluation"
-                            ),
-                            "translation_semantic_evaluation": result_metadata.get(
-                                "translation_semantic_evaluation"
-                            ),
-                            "result_metadata": result_metadata,
-                            "error": export_error,
-                        }
                         audit_handle.write(
-                            json.dumps(
-                                audit_record,
-                                ensure_ascii=False,
-                                default=str,
-                            )
-                            + "\n"
+                            json.dumps(audit_record, ensure_ascii=False, default=str) + "\n"
                         )
         finally:
             if audit_handle is not None:
@@ -867,27 +992,13 @@ class Environment(BaseModel, ABC):
             artifacts["audit_jsonl"] = str(audit_path)
         artifacts["summary_json"] = str(summary_path)
 
-        summary_payload = {
-            "environment": self.name,
-            "dataset_name": self.config.dataset.dataset_name,
-            "dataset_split": self.config.dataset.dataset_split,
-            "dataset_offset": self.config.dataset.dataset_offset,
-            "processed": len(tasks),
-            "accepted": accepted,
-            "rejected": rejected,
-            "errors": errors,
-            "acceptance_rate": accepted / len(tasks) if tasks else 0.0,
-            "mean_reward": sum(rewards) / len(rewards) if rewards else 0.0,
-            "model": self.config.get_llm_config().model,
-            "judge_model": (
-                self.config.llm_judge.model if self.config.llm_judge else None
-            ),
-            "artifacts": artifacts,
-        }
-        summary_path.write_text(
-            json.dumps(summary_payload, ensure_ascii=False, indent=2, default=str)
-            + "\n",
-            encoding="utf-8",
+        self._write_summary(
+            processed=len(tasks),
+            accepted=accepted,
+            rejected=rejected,
+            errors=errors,
+            rewards=rewards,
+            artifacts=artifacts,
         )
         logger.info(
             "Local export complete | accepted=%s rejected=%s errors=%s | %s",
@@ -1089,13 +1200,18 @@ class Environment(BaseModel, ABC):
         finally:
             await self.finalize()
 
-    async def _run_tasks(self, tasks: Sequence[Task]) -> List[Optional[TrajectoryResult]]:
+    async def _run_tasks(
+        self,
+        tasks: Sequence[Task],
+        on_result: Optional[Callable[[Task, Optional[TrajectoryResult]], Awaitable[None]]] = None,
+    ) -> List[Optional[TrajectoryResult]]:
         semaphore = asyncio.Semaphore(self.max_parallel_rollouts)
         completed = 0
 
         async def _run(task: Task) -> Optional[TrajectoryResult]:
             nonlocal completed
             status = "failed"
+            result: Optional[TrajectoryResult] = None
             async with semaphore:
                 try:
                     result = await self.run_task(task)
@@ -1106,8 +1222,14 @@ class Environment(BaseModel, ABC):
                     raise
                 except Exception as exc:
                     logger.exception("Task %s failed: %s", task.id, exc)
+                    result = None
                     return None
                 finally:
+                    if on_result is not None:
+                        try:
+                            await on_result(task, result)
+                        except Exception:  # pragma: no cover - export must not kill the run
+                            logger.exception("Incremental export failed for task %s", task.id)
                     completed += 1
                     logger.info(
                         "Progress %s/%s | task=%s | status=%s",
@@ -1308,6 +1430,20 @@ class Environment(BaseModel, ABC):
         await self.setup()
         tasks = list(self.load_tasks(limit))
 
+        skipped = 0
+        if self.config.dataset.output_sharegpt and self.config.dataset.incremental_export and self.config.dataset.resume:
+            done = self.completed_task_ids()
+            if done:
+                before = len(tasks)
+                tasks = [task for task in tasks if str(task.id) not in done]
+                skipped = before - len(tasks)
+                logger.info(
+                    "Resuming: %s of %s tasks already exported, %s remaining",
+                    skipped,
+                    before,
+                    len(tasks),
+                )
+
         if self.config.debug and tasks:
             task = tasks[0]
             print_task_start(task.id, task.prompt, getattr(task, 'expected_answer', None))
@@ -1315,8 +1451,32 @@ class Environment(BaseModel, ABC):
                            {"role": "user", "content": self.format_initial_message(task)}],
                            title="Initial Messages", truncate=False)
 
+        exporter = self._open_incremental_export(tasks)
+
+        async def _export(task: Task, result: Optional[TrajectoryResult]) -> None:
+            if exporter is None:
+                return
+            record, audit_record, accepted = self._build_export_records(task, result)
+            await exporter.write(
+                record,
+                audit_record,
+                accepted=accepted,
+                reward=float(result.total_reward or 0.0) if result is not None else None,
+                errored=result is None,
+            )
+
         # Run tasks in parallel
-        results = await self._run_tasks(tasks)
+        try:
+            results = await self._run_tasks(tasks, on_result=_export if exporter else None)
+        except BaseException:
+            if exporter is not None:
+                exporter.close()
+                logger.warning(
+                    "Run interrupted | %s rows exported so far | %s",
+                    exporter.accepted,
+                    exporter.sharegpt_path,
+                )
+            raise
 
         # Filter out None results and handle persistence
         valid_results = [r for r in results if r is not None]
@@ -1392,7 +1552,27 @@ class Environment(BaseModel, ABC):
             if persist_coros:
                 await asyncio.gather(*persist_coros)
 
-        artifacts, accepted, rejected = self._write_local_artifacts(tasks, results)
+        if exporter is not None:
+            artifacts = exporter.close()
+            accepted, rejected = exporter.accepted, exporter.rejected
+            artifacts["summary_json"] = str(self._export_paths()[2])
+            self._write_summary(
+                processed=len(tasks),
+                accepted=accepted,
+                rejected=rejected,
+                errors=exporter.errors,
+                rewards=exporter.rewards,
+                artifacts=artifacts,
+            )
+            logger.info(
+                "Local export complete | accepted=%s rejected=%s errors=%s | %s",
+                accepted,
+                rejected,
+                exporter.errors,
+                exporter.sharegpt_path,
+            )
+        else:
+            artifacts, accepted, rejected = self._write_local_artifacts(tasks, results)
 
         summary = EnvironmentRunSummary(
             environment=self.name,

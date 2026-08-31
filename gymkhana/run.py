@@ -102,6 +102,7 @@ def main():
             "romanized-nepali",
             "english-sharegpt-to-nepali",
             "multi-turn-qa",
+            "multilingual-tool-use",
         ],
         default=None,
         help="Task environment (overrides config)"
@@ -147,6 +148,11 @@ def main():
         "--questioner-model",
         default=None,
         help="Questioner model for multi-agent QA generation (overrides config)",
+    )
+    parser.add_argument(
+        "--localizer-model",
+        default=None,
+        help="Localizer model for multilingual tool-use (overrides config)",
     )
     parser.add_argument(
         "--qa-profile",
@@ -285,6 +291,10 @@ def main():
         if not hasattr(config, "questioner_llm"):
             raise ValueError("--questioner-model requires a multi-agent environment")
         config.questioner_llm.model = args.questioner_model
+    if args.localizer_model:
+        if not hasattr(config, "localizer_llm"):
+            raise ValueError("--localizer-model requires the multilingual tool-use environment")
+        config.localizer_llm.model = args.localizer_model
     if args.qa_profile:
         if not hasattr(config, "generation"):
             raise ValueError("--qa-profile requires a QA generation environment")
