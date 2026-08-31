@@ -160,7 +160,8 @@ class QuestionDraft(BaseModel):
 
     question: str = Field(min_length=3)
     visible_context: str = ""
-    expected_answer: str = Field(min_length=1)
+    reference_answer: Optional[str] = None
+    rubric: List[str] = Field(default_factory=list)
     answer_type: AnswerType
     verifier: VerifierType
     evidence: List[str] = Field(default_factory=list)
@@ -171,13 +172,36 @@ class QuestionDraft(BaseModel):
     @field_validator(
         "question",
         "visible_context",
-        "expected_answer",
         "learning_objective",
         "subcategory",
     )
     @classmethod
     def strip_text(cls, value: str) -> str:
         return value.strip()
+
+    @field_validator("reference_answer")
+    @classmethod
+    def strip_reference_answer(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+        stripped = value.strip()
+        return stripped or None
+
+    @model_validator(mode="after")
+    def validate_answer_contract(self) -> "QuestionDraft":
+        requires_reference = {
+            AnswerType.EXACT,
+            AnswerType.MULTIPLE_CHOICE,
+            AnswerType.NUMERIC,
+            AnswerType.SYMBOLIC,
+        }
+        if self.answer_type in requires_reference and not self.reference_answer:
+            raise ValueError(
+                f"reference_answer is required for answer_type={self.answer_type.value}"
+            )
+        if self.answer_type == AnswerType.RUBRIC and not self.rubric:
+            raise ValueError("rubric criteria are required for answer_type=rubric")
+        return self
 
 
 class QATurnPlan(BaseModel):
@@ -189,7 +213,8 @@ class QATurnPlan(BaseModel):
     question: str
     user_message: str
     visible_context: str = ""
-    expected_answer: str
+    reference_answer: Optional[str] = None
+    rubric: List[str] = Field(default_factory=list)
     answer_type: AnswerType
     verifier: VerifierType
     evidence: List[str] = Field(default_factory=list)

@@ -64,7 +64,8 @@ SOURCE = (
 def question_draft(
     *,
     question: str,
-    expected_answer: str,
+    reference_answer: Optional[str] = None,
+    rubric: Optional[List[str]] = None,
     subcategory: str,
     visible_context: str = "",
     evidence: Optional[List[str]] = None,
@@ -76,7 +77,8 @@ def question_draft(
         {
             "question": question,
             "visible_context": visible_context,
-            "expected_answer": expected_answer,
+            "reference_answer": reference_answer,
+            "rubric": rubric or [],
             "answer_type": answer_type,
             "verifier": verifier,
             "evidence": evidence or [],
@@ -316,7 +318,7 @@ async def test_two_agent_multiturn_run_exports_only_visible_context(tmp_path: Pa
     responses = [
         question_draft(
             question="यस नियमावलीको नाम के हो?",
-            expected_answer="यसको नाम परीक्षण नियमावली हो।",
+            reference_answer="यसको नाम परीक्षण नियमावली हो।",
             subcategory="definitions",
             visible_context=excerpt,
             evidence=[excerpt],
@@ -325,7 +327,7 @@ async def test_two_agent_multiturn_run_exports_only_visible_context(tmp_path: Pa
         JUDGE_PASS,
         question_draft(
             question="अघिल्लो उत्तरमा उल्लेख भएको नाम कुन नियममा दिइएको छ?",
-            expected_answer="नियम १ मा।",
+            reference_answer="नियम १ मा।",
             subcategory="definitions",
             standalone=False,
         ),
@@ -400,6 +402,48 @@ async def test_two_agent_multiturn_run_exports_only_visible_context(tmp_path: Pa
 
 
 @pytest.mark.asyncio
+async def test_rubric_criteria_reach_judge_prompt(tmp_path: Path) -> None:
+    excerpt = "नियम १ अनुसार निवेदन सम्बन्धित कार्यालयमा पेस गर्नुपर्छ।"
+    responses = [
+        question_draft(
+            question="निवेदन प्रक्रिया कस्तो हुनुपर्छ भनी व्याख्या गर्नुहोस्।",
+            reference_answer=None,
+            rubric=[
+                "उल्लेख गर्नुपर्ने कार्यालयको नाम",
+                "प्रक्रियागत चरणहरूको स्पष्टता",
+            ],
+            subcategory="definitions",
+            visible_context=excerpt,
+            evidence=[excerpt],
+            answer_type="rubric",
+            verifier="rubric",
+        ),
+        "निवेदन सम्बन्धित कार्यालयमा पेस गर्नुपर्छ र आवश्यक कागजात संलग्न गर्नुपर्छ।",
+        JUDGE_PASS,
+    ]
+    inference = ScriptedInference(responses=responses)
+    config = base_config(tmp_path, turns=1)
+    env = MultiTurnQAEnv(
+        config=config,
+        records=[{"id": "rubric-1", "text": SOURCE + excerpt}],
+        services=ServiceContainer(inference=inference),
+    )
+
+    summary = await env.run()
+
+    judge_calls = [
+        call
+        for call in inference.calls
+        if call["system_prompt"]
+        == "You are a precise evaluation judge. Follow the output format exactly."
+    ]
+    assert len(judge_calls) == 1
+    judge_prompt = judge_calls[0]["messages"][0]["content"]
+    assert "उल्लेख गर्नुपर्ने कार्यालयको नाम" in judge_prompt
+    assert "प्रक्रियागत चरणहरूको स्पष्टता" in judge_prompt
+
+
+@pytest.mark.asyncio
 async def test_source_grounded_profile_forces_judge_and_grounding_gate(
     tmp_path: Path,
 ) -> None:
@@ -407,7 +451,7 @@ async def test_source_grounded_profile_forces_judge_and_grounding_gate(
     responses = [
         question_draft(
             question="नियमअनुसार दस्तुर कति हो?",
-            expected_answer="४२",
+            reference_answer="४२",
             subcategory="definitions",
             visible_context=excerpt,
             evidence=[excerpt],
@@ -440,7 +484,7 @@ async def test_judge_score_is_normalized_before_threshold(tmp_path: Path) -> Non
     responses = [
         question_draft(
             question="यस नियमावलीको नाम के हो?",
-            expected_answer="परीक्षण नियमावली",
+            reference_answer="परीक्षण नियमावली",
             subcategory="conceptual",
             visible_context=excerpt,
             evidence=[excerpt],
@@ -480,7 +524,7 @@ async def test_single_turn_numeric_nepali_uses_deterministic_verifier(
     responses = [
         question_draft(
             question="२१ लाई २ ले गुणा गर्दा कति हुन्छ?",
-            expected_answer="४२",
+            reference_answer="४२",
             subcategory="math_stem",
             answer_type="numeric",
             verifier="numeric",
@@ -516,14 +560,14 @@ async def test_invalid_questioner_output_is_retried(tmp_path: Path) -> None:
     excerpt = "नियम १ अनुसार यस नियमावलीको नाम परीक्षण नियमावली हो।"
     invalid = question_draft(
         question="यस नियमावलीको नाम के हो?",
-        expected_answer="परीक्षण नियमावली",
+        reference_answer="परीक्षण नियमावली",
         subcategory="definitions",
         visible_context=excerpt,
         evidence=[],
     )
     valid = question_draft(
         question="यस नियमावलीको नाम के हो?",
-        expected_answer="परीक्षण नियमावली",
+        reference_answer="परीक्षण नियमावली",
         subcategory="definitions",
         visible_context=excerpt,
         evidence=[excerpt],
@@ -563,7 +607,7 @@ def _plan(verifier: str, expected: str):
     from gymkhana.envs.multi_turn_qa.models import QATurnPlan
 
     return QATurnPlan.model_construct(
-        expected_answer=expected,
+        reference_answer=expected,
         verifier=VerifierType(verifier),
         answer_type=AnswerType(verifier if verifier != "exact" else "exact"),
     )
