@@ -1,0 +1,35 @@
+# xlam-function-calling-60k with the user query localized into Nepali Devanagari.
+# Tool schemas and expected calls stay English; reward is exact tool-call match.
+# The dataset is gated on the Hub: accept its terms and log in (huggingface-cli login).
+name: multilingual-tool-use
+
+llm:
+  model: google:gemini-3.6-flash
+  temperature: 0.2
+  max_tokens: 2048
+
+localizer_llm:
+  model: google:gemini-3.6-flash
+  temperature: 0.2
+  max_tokens: 1024
+
+localization:
+  target_language: ne-Deva
+  max_attempts: 1          # hard-fail rows whose localization drops a protected token
+  # Add languages here, e.g.
+  # languages:
+  #   hi-Deva: {code: hi-Deva, name: Hindi (Devanagari), instruction: Write natural Hindi in Devanagari., script_regex: "[ऀ-ॿ]"}
+
+dataset:
+  dataset_name: Salesforce/xlam-function-calling-60k
+  dataset_split: train
+  dataset_offset: 0
+  limit: 100
+  batch_size: 4
+  num_rollouts: 4
+  output_dir: outputs/multilingual_tool_use/xlam_nepali
+  output_basename: xlam_nepali
+  output_sharegpt: true
+  output_audit_jsonl: true
+  enable_rewards: true
+  reward_function: tool_call_match

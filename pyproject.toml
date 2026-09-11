@@ -12,7 +12,7 @@ authors = [
 dependencies = [
   "pydantic>=2.6",
   "pydantic-settings>=2.0",
-  "pydantic-ai>=2,<3",
+  "pydantic-ai>=2.19,<3",  # ModelHTTPError(headers=...) landed in 2.19.0
   "python-dotenv>=1.0",
   "jsonschema>=4.20",
   "openai>=1.6",
