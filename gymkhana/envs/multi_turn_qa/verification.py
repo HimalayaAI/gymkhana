@@ -48,9 +48,7 @@ Question:
 Candidate answer:
 {response}
 
-Private reference answer:
-{reference}
-
+{reference_section}
 Grading criteria (required for rubric-graded turns; may be "(none supplied)" otherwise):
 {rubric_criteria}
 
@@ -256,9 +254,14 @@ class QAVerifier:
                 judge = await LLMJudge(self.judge_settings).score(
                     prompt=plan.question,
                     response=answer,
-                    reference=plan.reference_answer or "(no reference answer provided - verify against visible context and evidence)",
+                    reference=plan.reference_answer,
                     inference_service=self.inference_service,
                     extra_context={
+                        "reference_section": (
+                            f"Private reference answer:\n{plan.reference_answer}\n"
+                            if plan.reference_answer
+                            else ""
+                        ),
                         "rubric_criteria": (
                             "\n".join(f"- {c}" for c in plan.rubric)
                             or "(none supplied)"

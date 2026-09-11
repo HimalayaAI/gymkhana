@@ -443,6 +443,8 @@ async def test_rubric_criteria_reach_judge_prompt(tmp_path: Path) -> None:
     judge_prompt = judge_calls[0]["messages"][0]["content"]
     assert "उल्लेख गर्नुपर्ने कार्यालयको नाम" in judge_prompt
     assert "प्रक्रियागत चरणहरूको स्पष्टता" in judge_prompt
+    assert "Private reference answer:" not in judge_prompt
+    assert "no reference answer provided" not in judge_prompt
 
 
 @pytest.mark.asyncio
@@ -478,6 +480,16 @@ async def test_source_grounded_profile_forces_judge_and_grounding_gate(
     evaluation = summary.results[0].metadata["conversation_evaluation"]["turns"][0]
     assert evaluation["score"] == 0.9
     assert "source_grounding_below_required" in evaluation["reasons"]
+
+    judge_calls = [
+        call
+        for call in inference.calls
+        if call["system_prompt"]
+        == "You are a precise evaluation judge. Follow the output format exactly."
+    ]
+    assert len(judge_calls) == 1
+    judge_prompt = judge_calls[0]["messages"][0]["content"]
+    assert "Private reference answer:\n४२" in judge_prompt
 
 
 @pytest.mark.asyncio
