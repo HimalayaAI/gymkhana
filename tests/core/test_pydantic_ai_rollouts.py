@@ -245,13 +245,16 @@ async def test_transient_errors_are_retried_with_server_delay(monkeypatch) -> No
             raise ModelHTTPError(429, "m", body={"error": {"message": "Please retry in 22.2s"}})
         if calls["n"] == 2:
             raise ModelHTTPError(503, "m", body='{"error": {"retryDelay": "5s"}}')
+        if calls["n"] == 3:
+            # Retry-After header wins over the body regex (headers kwarg: pydantic-ai>=2.19).
+            raise ModelHTTPError(503, "m", body="retry in 99s", headers={"Retry-After": "7"})
         return ModelResponse(parts=[TextPart("ok")])
 
     service = PydanticAIInferenceService(retry_base_seconds=1.0, retry_max_seconds=60.0)
     out = await service.generate(messages=[{"role": "user", "content": "hi"}], model=FunctionModel(flaky))
     assert out == "ok"
-    assert calls["n"] == 3
-    assert sleeps == [22.2, 5.0]  # server-suggested delays win over backoff
+    assert calls["n"] == 4
+    assert sleeps == [22.2, 5.0, 7.0]  # server-suggested delays win over backoff
 
 
 @pytest.mark.asyncio
