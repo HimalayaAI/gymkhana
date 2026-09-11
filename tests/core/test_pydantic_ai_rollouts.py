@@ -242,9 +242,9 @@ async def test_transient_errors_are_retried_with_server_delay(monkeypatch) -> No
     def flaky(messages, info):
         calls["n"] += 1
         if calls["n"] == 1:
-            raise ModelHTTPError(429, "m", body={"error": {"message": "Please retry in 22.2s"}}, headers={})
+            raise ModelHTTPError(429, "m", body={"error": {"message": "Please retry in 22.2s"}})
         if calls["n"] == 2:
-            raise ModelHTTPError(503, "m", body="overloaded", headers={"Retry-After": "5"})
+            raise ModelHTTPError(503, "m", body='{"error": {"retryDelay": "5s"}}')
         return ModelResponse(parts=[TextPart("ok")])
 
     service = PydanticAIInferenceService(retry_base_seconds=1.0, retry_max_seconds=60.0)
