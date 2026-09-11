@@ -674,6 +674,19 @@ def test_numeric_uses_candidate_final_or_boxed_number(
     assert got == score, details
 
 
+def test_deterministic_score_guards_against_missing_reference_answer(
+    tmp_path: Path,
+) -> None:
+    """Regression coverage for issue #22: QATurnPlan carries no validator, so a
+    mismatched construction (e.g. verifier=numeric with reference_answer=None)
+    must fail safely here rather than crashing normalize_text()."""
+    verifier = _verifier(tmp_path)
+    plan = _plan("numeric", None)
+    score, details = verifier._deterministic_score(plan, "42")
+    assert score == 0.0
+    assert details == {"reason": "missing_reference"}
+
+
 def test_builtin_language_specs_are_registered() -> None:
     from gymkhana.envs.multi_turn_qa import BUILTIN_LANGUAGES, resolve_language
 
