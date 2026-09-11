@@ -117,3 +117,10 @@ the original date text is preserved without guessing a calendar conversion.
 
 Each run writes accepted ShareGPT JSONL, a full audit JSONL with private plans
 and verifier results, a summary JSON, and `run.log` under `dataset.output_dir`.
+
+**Audit schema note:** the `question_plans` field inside the audit JSONL is
+dumped verbatim from `QATurnPlan`. Audit files written before the
+`reference_answer`/`rubric` contract (see #11) used the field name
+`expected_answer`; files written after use `reference_answer` and `rubric`.
+Anything reading historical audit files should accept both field names rather
+than assuming one schema.
