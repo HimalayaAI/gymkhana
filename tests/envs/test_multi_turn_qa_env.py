@@ -17,6 +17,7 @@ from gymkhana.envs.multi_turn_qa import (
     QAGenerationSettings,
     QAVerifier,
     QuestionDraft,
+    SourceDocument,
     VerifierType,
 )
 from gymkhana.envs.multi_turn_qa.profiles import get_profile, select_qa_subcategory
@@ -330,6 +331,7 @@ async def test_two_agent_multiturn_run_exports_only_visible_context(tmp_path: Pa
             reference_answer="नियम १ मा।",
             subcategory="definitions",
             standalone=False,
+            evidence=[excerpt],
         ),
         "त्यो नाम नियम १ मा दिइएको छ।",
         JUDGE_PASS,
@@ -619,6 +621,59 @@ def _verifier(tmp_path: Path, **overrides: Any) -> QAVerifier:
         setattr(config.generation, key, value)
     return QAVerifier(settings=config.generation)
 
+class TestSourceGroundedRequiresEvidence:
+    """Regression coverage for issue #19: source_grounded must require evidence
+    regardless of context policy, not just under INLINE_EXCERPT."""
+
+    def test_conversation_grounded_source_grounded_without_evidence_is_rejected(
+        self, tmp_path: Path
+    ) -> None:
+        verifier = _verifier(tmp_path)
+        source = SourceDocument(id="doc-1", text=SOURCE, source="Test source")
+        draft = QuestionDraft(
+            question="अघिल्लो उत्तरमा उल्लेख भएको नाम कुन नियममा दिइएको छ?",
+            reference_answer=None,
+            answer_type=AnswerType.SOURCE_GROUNDED,
+            verifier=VerifierType.SOURCE_GROUNDED,
+            evidence=[],
+            learning_objective="follow-up grounding check",
+            subcategory="definitions",
+            standalone=False,
+        )
+
+        issues = verifier.validate_draft(
+            draft,
+            source=source,
+            policy=ContextPolicy.CONVERSATION_GROUNDED,
+            subcategory="definitions",
+        )
+
+        assert "missing_source_evidence" in issues
+
+    def test_conversation_grounded_source_grounded_with_evidence_is_accepted(
+        self, tmp_path: Path
+    ) -> None:
+        verifier = _verifier(tmp_path)
+        source = SourceDocument(id="doc-1", text=SOURCE, source="Test source")
+        draft = QuestionDraft(
+            question="अघिल्लो उत्तरमा उल्लेख भएको नाम कुन नियममा दिइएको छ?",
+            reference_answer=None,
+            answer_type=AnswerType.SOURCE_GROUNDED,
+            verifier=VerifierType.SOURCE_GROUNDED,
+            evidence=["नियम १ अनुसार"],
+            learning_objective="follow-up grounding check",
+            subcategory="definitions",
+            standalone=False,
+        )
+
+        issues = verifier.validate_draft(
+            draft,
+            source=source,
+            policy=ContextPolicy.CONVERSATION_GROUNDED,
+            subcategory="definitions",
+        )
+
+        assert "missing_source_evidence" not in issues
 
 @pytest.mark.parametrize(
     ("expected", "candidate", "score"),
