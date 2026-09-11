@@ -8,7 +8,7 @@ Tests the refactored sandbox abstractions including:
 
 import pytest
 from unittest.mock import MagicMock, patch, AsyncMock
-
+from gymkhana.core.services.sandboxes.server.engine import PythonSandbox
 from gymkhana.core.models.sandbox import (
     SandboxBackend,
     ResourceConfig,
@@ -461,3 +461,33 @@ class TestREPLSandboxWithMock:
         assert sandbox.session_id is None
         assert sandbox.current_session is None
         mock_client.delete_session.assert_called_once()
+
+
+class TestSandboxFileReadingUTF8:
+    """Regression coverage for issue #17: read_text() calls must pin UTF-8."""
+
+    def test_read_file_preserves_devanagari(self, tmp_path):
+        (tmp_path / "note.txt").write_text(
+            "यसको नाम परीक्षण नियमावली हो।", encoding="utf-8"
+        )
+        sandbox = PythonSandbox(workspace_dir=str(tmp_path))
+        content = sandbox._read_file("note.txt", raw=True)
+        assert content == "यसको नाम परीक्षण नियमावली हो।"
+
+    def test_read_file_json_preserves_devanagari(self, tmp_path):
+        import json
+        (tmp_path / "data.json").write_text(
+            json.dumps({"title": "नेपालको राजधानी"}, ensure_ascii=False),
+            encoding="utf-8",
+        )
+        sandbox = PythonSandbox(workspace_dir=str(tmp_path))
+        parsed = sandbox._read_file("data.json")
+        assert parsed["title"] == "नेपालको राजधानी"
+
+    def test_search_files_matches_devanagari(self, tmp_path):
+        (tmp_path / "doc.txt").write_text(
+            "काठमाडौं नेपालको राजधानी हो।", encoding="utf-8"
+        )
+        sandbox = PythonSandbox(workspace_dir=str(tmp_path))
+        results = sandbox._search_files("राजधानी")
+        assert results
