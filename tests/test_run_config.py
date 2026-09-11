@@ -55,3 +55,37 @@ def test_cli_environment_override_wins_over_yaml_name(tmp_path: Path) -> None:
 
     assert env_name == "english-sharegpt-to-nepali"
     assert config.dataset.limit == 3
+
+
+def test_google_client_prefixes_bare_gemini_model(tmp_path: Path) -> None:
+    config_path = tmp_path / "gemini.yaml"
+    config_path.write_text(
+        """
+name: english-sharegpt-to-nepali
+llm:
+  model: gemini-2.5-flash
+  client: google
+llm_judge:
+  model: google:gemini-2.5-flash-lite
+  client: google
+""".strip(),
+        encoding="utf-8",
+    )
+
+    _, config = load_environment_config(config_path)
+
+    assert config.llm.client.value == "google"
+    assert config.llm.model_identifier == "google:gemini-2.5-flash"
+    assert config.llm_judge.model == "google:gemini-2.5-flash-lite"
+
+
+def test_google_model_identifier_resolves_to_native_gemini_provider(monkeypatch) -> None:
+    from pydantic_ai.models import infer_model
+
+    from gymkhana.envs.config import InferenceConfig, LLMClientType
+
+    monkeypatch.setenv("GEMINI_API_KEY", "test-key")
+    identifier = InferenceConfig(
+        model="gemini-2.5-flash", client=LLMClientType.GOOGLE
+    ).model_identifier
+    assert type(infer_model(identifier)).__name__ == "GoogleModel"

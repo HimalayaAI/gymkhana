@@ -61,3 +61,17 @@ def test_sub_agent_requires_task():
 
     assert response.status_code == 400
     assert response.get_json() == {"error": "No task provided"}
+
+
+def test_sub_agent_maps_gemini_client_to_google_provider():
+    generate = AsyncMock(return_value="ok")
+
+    with patch.object(PydanticAIInferenceService, "generate", generate):
+        response = app.test_client().post(
+            "/sub_agent",
+            json={"task": "Answer", "model": "gemini-2.5-flash", "client": "gemini"},
+        )
+
+    assert response.status_code == 200
+    assert response.get_json()["model"] == "google:gemini-2.5-flash"
+    assert generate.await_args.kwargs["model"] == "google:gemini-2.5-flash"

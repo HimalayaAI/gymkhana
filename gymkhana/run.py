@@ -169,9 +169,13 @@ def main():
     )
     parser.add_argument(
         "--client",
-        choices=["openai", "anthropic", "litellm"],
+        choices=["openai", "anthropic", "google", "gemini", "litellm"],
         default=None,
-        help="LLM client (overrides config)"
+        help=(
+            "LLM client (overrides config). Prefixes bare model names, e.g. "
+            "--client google --model gemini-2.5-flash -> google:gemini-2.5-flash; "
+            "gemini is an alias for google"
+        ),
     )
     parser.add_argument(
         "--limit",
@@ -262,6 +266,8 @@ def main():
     client_map = {
         "openai": LLMClientType.OPENAI,
         "anthropic": LLMClientType.ANTHROPIC,
+        "google": LLMClientType.GOOGLE,
+        "gemini": LLMClientType.GOOGLE,
         "litellm": LLMClientType.LITELLM,
     }
 

@@ -29,6 +29,7 @@ class LLMClientType(Enum):
     """Supported LLM clients."""
     OPENAI = "openai"
     ANTHROPIC = "anthropic"
+    GOOGLE = "google"  # Gemini via Pydantic AI's `google:` provider (GEMINI_API_KEY)
     LITELLM = "litellm"
 
 
