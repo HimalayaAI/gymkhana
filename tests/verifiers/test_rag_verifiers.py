@@ -9,7 +9,7 @@ from pydantic import BaseModel, Field
 
 from gymkhana.core.services.inference import InferenceService
 from gymkhana.core.services.inference.pydantic_ai import PydanticAIInferenceService
-from gymkhana.envs.config import LLMJudgeSettings
+from gymkhana.verifiers.rag.models import RAGJudgeSettings
 from gymkhana.verifiers.rag import (
     ClaimVerdict,
     ContextPrecisionVerifier,
@@ -63,8 +63,8 @@ class ScriptedInferenceService(InferenceService):
 
 
 @pytest.fixture
-def settings() -> LLMJudgeSettings:
-    return LLMJudgeSettings(model="test:external-judge", temperature=0.0)
+def settings() -> RAGJudgeSettings:
+    return RAGJudgeSettings(model="test:external-judge", temperature=0.0)
 
 
 @pytest.fixture
@@ -82,7 +82,7 @@ def sample() -> RAGSample:
 
 @pytest.mark.asyncio
 async def test_faithfulness_score_is_computed_from_claim_verdicts(
-    settings: LLMJudgeSettings, sample: RAGSample
+    settings: RAGJudgeSettings, sample: RAGSample
 ) -> None:
     service = ScriptedInferenceService(
         outputs=[
@@ -120,7 +120,7 @@ async def test_faithfulness_score_is_computed_from_claim_verdicts(
 
 @pytest.mark.asyncio
 async def test_faithfulness_rejects_empty_or_failed_judgments(
-    settings: LLMJudgeSettings, sample: RAGSample
+    settings: RAGJudgeSettings, sample: RAGSample
 ) -> None:
     no_claims = FaithfulnessVerifier(
         settings=settings,
@@ -146,7 +146,7 @@ async def test_faithfulness_rejects_empty_or_failed_judgments(
 
 @pytest.mark.asyncio
 async def test_groundedness_maps_external_label_in_trusted_code(
-    settings: LLMJudgeSettings, sample: RAGSample
+    settings: RAGJudgeSettings, sample: RAGSample
 ) -> None:
     service = ScriptedInferenceService(
         outputs=[
@@ -172,7 +172,7 @@ async def test_groundedness_maps_external_label_in_trusted_code(
 
 @pytest.mark.asyncio
 async def test_response_relevance_is_distinct_from_grounding(
-    settings: LLMJudgeSettings, sample: RAGSample
+    settings: RAGJudgeSettings, sample: RAGSample
 ) -> None:
     service = ScriptedInferenceService(
         outputs=[
@@ -197,7 +197,7 @@ async def test_response_relevance_is_distinct_from_grounding(
 
 @pytest.mark.asyncio
 async def test_context_relevance_scores_fraction_of_relevant_contexts(
-    settings: LLMJudgeSettings, sample: RAGSample
+    settings: RAGJudgeSettings, sample: RAGSample
 ) -> None:
     service = ScriptedInferenceService(
         outputs=[
@@ -229,7 +229,7 @@ async def test_context_relevance_scores_fraction_of_relevant_contexts(
 
 @pytest.mark.asyncio
 async def test_context_precision_rewards_relevant_contexts_earlier(
-    settings: LLMJudgeSettings, sample: RAGSample
+    settings: RAGJudgeSettings, sample: RAGSample
 ) -> None:
     judgment = ContextRelevanceJudgment(
         verdicts=[
@@ -251,7 +251,7 @@ async def test_context_precision_rewards_relevant_contexts_earlier(
 
 @pytest.mark.asyncio
 async def test_context_verifier_rejects_missing_or_duplicate_indices(
-    settings: LLMJudgeSettings, sample: RAGSample
+    settings: RAGJudgeSettings, sample: RAGSample
 ) -> None:
     duplicate = ContextRelevanceJudgment(
         verdicts=[
@@ -294,7 +294,7 @@ def test_rag_sample_rejects_blank_contexts() -> None:
         RAGSample(question="Question?", contexts=["valid", "  "])
 
 
-def test_verifier_rejects_invalid_threshold(settings: LLMJudgeSettings) -> None:
+def test_verifier_rejects_invalid_threshold(settings: RAGJudgeSettings) -> None:
     with pytest.raises(ValueError, match="between 0 and 1"):
         FaithfulnessVerifier(
             settings=settings,

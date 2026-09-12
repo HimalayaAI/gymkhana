@@ -105,6 +105,31 @@ class RAGMetricResult(BaseModel):
     error: Optional[str] = None
 
 
+class RAGJudgeSettings(BaseModel):
+    """Judge configuration actually honored by BaseRAGVerifier.
+
+    Deliberately narrower than LLMJudgeSettings: RAG verifiers call
+    inference_service.generate_structured directly and do not route through
+    LLMJudge, so client and num_judges are not supported here. Passing an
+    LLMJudgeSettings with those fields set previously appeared to work but
+    silently ignored them (see issue #10) - this class makes the supported
+    surface explicit instead.
+    """
+
+    model: str = Field(description="Judge model name (e.g. 'gpt-4o-mini').")
+    temperature: float = Field(
+        default=0.0,
+        ge=0.0,
+        le=2.0,
+        description="Low temperature for scoring consistency.",
+    )
+    max_tokens: int = Field(
+        default=1024,
+        ge=1,
+        description="Max tokens for judge response.",
+    )
+
+
 @runtime_checkable
 class RAGVerifier(Protocol):
     """Common asynchronous interface implemented by built-in RAG metrics."""
