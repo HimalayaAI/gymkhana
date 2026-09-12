@@ -61,7 +61,7 @@ def init_database():
             sys.exit(1)
 
         print(f"Applying schema from {schema_path}...")
-        with open(schema_path, "r") as f:
+        with open(schema_path, "r", encoding="utf-8") as f:
             schema = f.read()
 
         with conn.cursor() as cursor:
