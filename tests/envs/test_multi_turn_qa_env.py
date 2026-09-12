@@ -838,3 +838,47 @@ def test_yaml_can_declare_target_language_before_languages(tmp_path: Path) -> No
     _, config = load_environment_config(config_path)
     assert config.generation.language_spec.name == "Maithili (Devanagari)"
     assert QAVerifier(settings=config.generation).language_issues("ई उत्तर मैथिली मे अछि।") == []
+
+
+@pytest.mark.asyncio
+async def test_source_grounded_with_no_reference_answer_omits_placeholder(
+    tmp_path: Path,
+) -> None:
+    """Regression coverage for issue #21's literal scenario: a source_grounded
+    turn (not rubric) with reference_answer=None must not surface any
+    "Private reference answer" line, placeholder or otherwise, in the judge
+    prompt."""
+    excerpt = "नियम १ अनुसार दस्तुर ४२ रुपैयाँ हो।"
+    responses = [
+        question_draft(
+            question="नियमअनुसार दस्तुर कति हो भनी व्याख्या गर्नुहोस्।",
+            reference_answer=None,
+            subcategory="definitions",
+            visible_context=excerpt,
+            evidence=[excerpt],
+            answer_type="source_grounded",
+            verifier="source_grounded",
+        ),
+        "दस्तुर ४२ रुपैयाँ हो।",
+        JUDGE_PASS,
+    ]
+    inference = ScriptedInference(responses=responses)
+    config = base_config(tmp_path, turns=1)
+    env = MultiTurnQAEnv(
+        config=config,
+        records=[{"id": "source-grounded-null-ref", "text": SOURCE + excerpt}],
+        services=ServiceContainer(inference=inference),
+    )
+
+    summary = await env.run()
+
+    judge_calls = [
+        call
+        for call in inference.calls
+        if call["system_prompt"]
+        == "You are a precise evaluation judge. Follow the output format exactly."
+    ]
+    assert len(judge_calls) == 1
+    judge_prompt = judge_calls[0]["messages"][0]["content"]
+    assert "Private reference answer:" not in judge_prompt
+    assert "no reference answer provided" not in judge_prompt
