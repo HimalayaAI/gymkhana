@@ -180,6 +180,8 @@ class QAVerifier:
     def _deterministic_score(
         self, plan: QATurnPlan, answer: str
     ) -> tuple[float, dict[str, Any]]:
+        if plan.reference_answer is None:
+            return 0.0, {"reason": "missing_reference"}
         expected = normalize_text(plan.reference_answer)
         candidate = normalize_text(answer)
         if plan.verifier == VerifierType.MULTIPLE_CHOICE and len(expected) <= 2:
