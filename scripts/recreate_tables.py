@@ -65,7 +65,7 @@ async def recreate_tables(
         schema_path = project_root / "gymkhana" / "core" / "services" / "storage" / "schema.sql"
         print(f"\n📝 Applying schema from {schema_path}...")
 
-        with open(schema_path, "r") as f:
+        with open(schema_path, "r", encoding="utf-8") as f:
             schema_sql = f.read()
 
         await conn.execute(schema_sql)

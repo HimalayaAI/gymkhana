@@ -115,7 +115,7 @@ class SQLStorageService(StorageService):
 
         # Apply schema only if schema_path is set and file exists
         if self.schema_path and os.path.exists(self.schema_path):
-            with open(self.schema_path, "r") as f:
+            with open(self.schema_path, "r", encoding="utf-8") as f:
                 schema_sql = f.read()
 
             try:

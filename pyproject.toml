@@ -39,7 +39,8 @@ dependencies = [
 dev = [
   "packaging>=24",
   "pytest>=7.4",
-  "pytest-asyncio>=0.23"
+  "pytest-asyncio>=0.23",
+  "ruff>=0.16"
 ]
 
 [tool.uv]
@@ -59,3 +60,10 @@ norecursedirs = ["reference_repos"]
 pythonpath = [
   "."
 ]
+
+[tool.ruff]
+exclude = ["reference_repos", "scratchpad"]
+
+[tool.ruff.lint]
+preview = true
+select = ["PLW1514"]
