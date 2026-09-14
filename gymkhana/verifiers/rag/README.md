@@ -72,13 +72,12 @@ the score is `0.0`.
 ## Usage inside an environment
 
 ```python
-from gymkhana.envs.config import LLMJudgeSettings
-from gymkhana.verifiers.rag import FaithfulnessVerifier, RAGSample
+from gymkhana.verifiers.rag import FaithfulnessVerifier, RAGJudgeSettings, RAGSample
 
-async def compute_reward(self, result, answer_correct=None, task=None):
+async def compute_reward(self, result, *, answer_correct=None, metadata=None, task=None):
     verifier = FaithfulnessVerifier(
-        settings=LLMJudgeSettings(model="openai:gpt-4.1-mini"),
-        inference_service=self._inference_service,
+        settings=RAGJudgeSettings(model="openai:gpt-4.1-mini"),
+        inference_service=self.inference_service,
         threshold=1.0,
     )
     metric = await verifier.verify(

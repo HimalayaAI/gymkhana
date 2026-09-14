@@ -160,12 +160,11 @@ practice, including RAGAS, while using Gymkhana's provider-neutral Pydantic AI
 inference layer.
 
 ```python
-from gymkhana.envs.config import LLMJudgeSettings
-from gymkhana.verifiers.rag import FaithfulnessVerifier, RAGSample
+from gymkhana.verifiers.rag import FaithfulnessVerifier, RAGJudgeSettings, RAGSample
 
 verifier = FaithfulnessVerifier(
-    settings=LLMJudgeSettings(model="openai:gpt-4.1-mini"),
-    inference_service=env._inference_service,
+    settings=RAGJudgeSettings(model="openai:gpt-4.1-mini"),
+    inference_service=env.inference_service,
 )
 result = await verifier.verify(
     RAGSample(

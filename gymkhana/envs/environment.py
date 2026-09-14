@@ -306,6 +306,16 @@ class Environment(BaseModel, ABC):
     _answer_parser: AnswerParser = PrivateAttr(default_factory=BoxedAnswerParser)
     _answer_verifier: AnswerVerifier = PrivateAttr(default_factory=SimpleEqualityVerifier)
 
+    @property
+    def inference_service(self) -> Optional[InferenceService]:
+        """Public read-only access to the environment's inference service.
+
+        Intended for compute_reward() implementations that need to construct
+        a verifier (e.g. gymkhana.verifiers.rag.*) without reaching into a
+        private attribute.
+        """
+        return self._inference_service
+
     model_config = ConfigDict(arbitrary_types_allowed=True, validate_assignment=True)
 
     def __init__(self, **data: Any) -> None:  # type: ignore[override]

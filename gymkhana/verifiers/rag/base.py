@@ -9,8 +9,7 @@ from typing import Any, TypeVar
 from pydantic import BaseModel
 
 from gymkhana.core.services.inference import InferenceService
-from gymkhana.envs.config import LLMJudgeSettings
-from gymkhana.verifiers.rag.models import RAGMetricResult
+from gymkhana.verifiers.rag.models import RAGJudgeSettings, RAGMetricResult
 
 logger = logging.getLogger(__name__)
 
@@ -25,7 +24,7 @@ class BaseRAGVerifier:
     def __init__(
         self,
         *,
-        settings: LLMJudgeSettings,
+        settings: RAGJudgeSettings,
         inference_service: InferenceService,
         threshold: float,
     ) -> None:
