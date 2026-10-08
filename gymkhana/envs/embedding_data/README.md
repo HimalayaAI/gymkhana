@@ -101,6 +101,24 @@ Preserve original source text as corpus passages; generated content should
 create queries or propose candidate labels, with verification before a label
 enters the training set.
 
+### Negative count for training exports
+
+The training target is **five distinct negatives per positive passage for a
+query**. Count an expanded triplet for each `(query, positive, negative)`
+combination. At a 5:1 ratio, 15–20k triplets therefore requires 3–4k
+query-positive pairs before deduplication. Report the unique query count,
+query-positive pair count, verified negative count, and final triplet count
+separately. When a seed row has fewer than five negatives, a corpus-backed
+export must retrieve and verify additional candidates; do not pad the count
+with duplicates or unverified passages. If five valid negatives cannot be
+found, keep the row flagged below target rather than silently treating it as
+complete.
+
+The current seed-preserving query-augmentation mode retains the seed's
+negative list and does not guarantee five negatives per positive. Meeting the
+5:1 target requires a negative-mining/export step; keep the original seed
+labels identifiable in provenance.
+
 Run a small generation pass:
 
 ```bash
