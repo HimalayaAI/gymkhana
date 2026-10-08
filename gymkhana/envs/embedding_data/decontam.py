@@ -9,7 +9,7 @@ trimmed, so Devanagari vowel signs and combining marks stay inside words (a
 from __future__ import annotations
 
 import unicodedata
-from typing import Any, Iterable, Mapping, Sequence
+from typing import Any, Iterable, Mapping, Optional, Sequence
 
 N = 5
 
@@ -49,11 +49,14 @@ def filter_rows(
     threshold: float = 0.5,
     fields: Sequence[str] = ("query", "positive"),
     n: int = N,
+    negative_target: Optional[int] = None,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """Split rows into (kept, dropped). A row is dropped when any checked field
     overlaps the eval set by ``threshold`` or more; dropped rows get ``decontam``
     metadata naming the field and the share. ``negatives`` entries are checked
-    one by one and removed individually instead of dropping the row."""
+    one by one and removed individually instead of dropping the row. When
+    ``negative_target`` is given, ``below_target`` is recomputed after pruning
+    (a row that falls under the target is flagged, never silently kept as complete)."""
     index = build_index(eval_texts, n)
     kept: list[dict[str, Any]] = []
     dropped: list[dict[str, Any]] = []
@@ -76,6 +79,9 @@ def filter_rows(
                 row["negatives"] = [negatives[i] for i in keep]
                 if isinstance(row.get("negative_types"), list):
                     row["negative_types"] = [row["negative_types"][i] for i in keep if i < len(row["negative_types"])]
+                row["negatives_pruned"] = len(negatives) - len(keep)
+            if negative_target is not None:
+                row["below_target"] = len(row["negatives"]) < negative_target
         kept.append(row)
     return kept, dropped
 

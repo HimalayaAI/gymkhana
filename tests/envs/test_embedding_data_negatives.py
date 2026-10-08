@@ -53,3 +53,39 @@ def test_filter_rows_drops_overlapping_rows_and_prunes_negatives() -> None:
     kept, dropped = filter_rows(rows, [eval_text])
     assert len(dropped) == 1 and dropped[0]["decontam"]["field"] == "positive"
     assert kept[0]["negatives"] == ["अर्कै कुरा हो यो पाँच शब्दभन्दा लामो"] and kept[0]["negative_types"] == ["b"]
+
+
+def test_below_target_is_recomputed_after_pruning_negatives() -> None:
+    eval_text = "नेपालको संविधानले प्रत्येक नागरिकलाई शिक्षाको हक दिएको छ।"
+    row = {
+        "query": "के हो?",
+        "positive": "बिल्कुल फरक वाक्य यहाँ छ भन्ने कुरा हो",
+        "negatives": [eval_text, "एक अर्को लामो नकारात्मक वाक्य यहाँ छ"],
+        "negative_types": ["mined_verified", "mined_verified"],
+        "below_target": False,
+    }
+    kept, _ = filter_rows([row], [eval_text], negative_target=2)
+    assert len(kept[0]["negatives"]) == 1
+    assert kept[0]["below_target"] is True and kept[0]["negatives_pruned"] == 1
+
+
+def test_cli_decontam_indexes_passages_from_a_separate_eval_corpus(tmp_path) -> None:
+    import json
+
+    from gymkhana.envs.embedding_data.postprocess import main
+
+    eval_passage = "नेपालको संविधानले प्रत्येक नागरिकलाई शिक्षाको हक दिएको छ।"
+    (tmp_path / "queries.jsonl").write_text(
+        json.dumps({"qid": "q1", "query": "शिक्षाको हक के हो", "positive_ids": ["p1"]}, ensure_ascii=False) + "\n", encoding="utf-8"
+    )
+    (tmp_path / "corpus.jsonl").write_text(json.dumps({"pid": "p1", "text": eval_passage}, ensure_ascii=False) + "\n", encoding="utf-8")
+    (tmp_path / "train.jsonl").write_text(
+        json.dumps({"query": "कुनै अर्को प्रश्न हो यो", "positive": eval_passage, "negatives": []}, ensure_ascii=False) + "\n", encoding="utf-8"
+    )
+    out = tmp_path / "clean.jsonl"
+    args = ["decontam", str(tmp_path / "train.jsonl"), str(out), "--eval-jsonl", str(tmp_path / "queries.jsonl")]
+    main(args)  # query table alone does not hold the passage text
+    assert len(out.read_text(encoding="utf-8").splitlines()) == 1
+    main(args + ["--eval-corpus", str(tmp_path / "corpus.jsonl")])
+    assert out.read_text(encoding="utf-8").strip() == ""
+    assert len((tmp_path / "clean.dropped.jsonl").read_text(encoding="utf-8").splitlines()) == 1
