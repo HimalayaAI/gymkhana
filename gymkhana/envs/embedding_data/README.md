@@ -31,6 +31,27 @@ Generated paraphrases are attached to the seed positive and negatives. Seed
 rows themselves are preserved as the baseline labels. The judge is a filter,
 not legal validation; generated examples should be sampled for human review.
 
+## Suggested augmentation approaches
+
+The current method is **label-preserving query augmentation**: change the
+query while keeping its seed positives and negatives fixed. Other approaches
+can teach additional retrieval behavior:
+
+| Approach | What changes | What to verify |
+| --- | --- | --- |
+| Generate queries from positives | Write realistic questions that a passage answers, including facts not covered by the seed query. | The positive directly supports the query; reject questions that require outside facts. |
+| Vary search style | Create keyword searches, conversational requests, common Nepali-English phrasing, and controlled noisy queries. | Each version keeps the same information need. Keep noisy queries labeled separately for sampling. |
+| Cross-script and code-switched queries | Create Romanized Nepali, Devanagari, and mixed-language forms. | Check script and semantic equivalence; sample ambiguous transliterations for human review. |
+| Add multiple positives | Attach multiple relevant passages or title/section/passage views to one query. | Verify every positive independently answers the query. This needs multi-positive schema support. |
+| Mine hard negatives | Retrieve nearby passages that look relevant but do not answer the query. | Verify they are genuinely non-relevant; a negative containing the answer creates a false label. |
+| Build multi-passage examples | Pair a query with multiple passages needed to answer it. | Verify the set supports the query and record whether one or all passages are required. This needs multi-passage labels and verification. |
+| Use real search behavior | Turn privacy-reviewed user queries, reformulations, and clicks into retrieval examples. | Treat clicks as candidate relevance signals, not ground truth; verify the passage label. |
+
+Recommended order: generate queries from source passages first, then add
+cross-script variants. Add verified hard-negative mining after a domain corpus
+is indexed. Multiple positives and multi-passage examples require a schema
+extension; real search behavior requires privacy-reviewed logs.
+
 ## Proposed corpus-mining environment and benchmark dataset
 
 The current `embedding-data` environment only augments queries while keeping
