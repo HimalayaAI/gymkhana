@@ -40,6 +40,7 @@ can teach additional retrieval behavior:
 | Approach | What changes | What to verify |
 | --- | --- | --- |
 | Generate queries from positives | Write realistic questions that a passage answers, including facts not covered by the seed query. | The positive directly supports the query; reject questions that require outside facts. |
+| Generate positives and negatives from queries | Start with queries from a non-embedding seed dataset, retrieve source passages as positives, and mine five negatives per positive from a domain corpus. A seed answer can guide retrieval, but should only be the positive when FAQ answers are the intended retrieval documents. | Verify that each positive supports the query and every negative fails to answer it. Require corpus provenance, deduplicate candidates, and flag queries without five valid negatives instead of padding. |
 | Vary search style | Create keyword searches, conversational requests, common Nepali-English phrasing, and controlled noisy queries. | Each version keeps the same information need. Keep noisy queries labeled separately for sampling. |
 | Cross-script and code-switched queries | Create Romanized Nepali, Devanagari, and mixed-language forms. | Check script and semantic equivalence; sample ambiguous transliterations for human review. |
 | Add multiple positives | Attach multiple relevant passages or title/section/passage views to one query. | Verify every positive independently answers the query. This needs multi-positive schema support. |
@@ -48,9 +49,11 @@ can teach additional retrieval behavior:
 | Use real search behavior | Turn privacy-reviewed user queries, reformulations, and clicks into retrieval examples. | Treat clicks as candidate relevance signals, not ground truth; verify the passage label. |
 
 Recommended order: generate queries from source passages first, then add
-cross-script variants. Add verified hard-negative mining after a domain corpus
-is indexed. Multiple positives and multi-passage examples require a schema
-extension; real search behavior requires privacy-reviewed logs.
+cross-script variants. Once a domain corpus is indexed, use it both to mine
+verified hard negatives for existing labels and to generate positives and
+five negatives from query-only or QA seed rows. Multiple positives and
+multi-passage examples require a schema extension; real search behavior
+requires privacy-reviewed logs.
 
 ## Proposed corpus-mining environment and benchmark dataset
 
