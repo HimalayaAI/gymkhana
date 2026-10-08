@@ -218,3 +218,90 @@ async def test_seed_only_run_writes_retrieval_jsonl(tmp_path: Path) -> None:
     audit_row = json.loads(audit_path.read_text(encoding="utf-8").splitlines()[0])
     assert "seed_row" not in audit_row
     assert "retrieval_summary_json" in summary.artifacts
+
+
+def _verifying_env(judge_replies, records):
+    class JudgedEmbeddingEnv(EmbeddingDataEnv):
+        _replies = PrivateAttr()
+
+        def __init__(self, **kwargs):
+            super().__init__(**kwargs)
+            self._replies = iter(judge_replies)
+
+        async def generate_response(self, **kwargs):
+            return next(self._replies), None
+
+    def retrieve_all(queries, passages, top_k):
+        return [list(range(len(passages))) for _ in queries]
+
+    env = JudgedEmbeddingEnv(records=records, negative_retriever=retrieve_all)
+    env._inference_service = object()
+    settings = env.embedding_config.embedding
+    settings.generate_paraphrases = False
+    settings.verify_negatives = True
+    settings.negative_target = 2
+    return env
+
+
+@pytest.mark.asyncio
+async def test_verify_stage_drops_false_negatives_and_audits_them() -> None:
+    records = [
+        {"id": "a", "query": "क्वेरी एक?", "positive": "उत्तर एक।", "negatives": ["बिल्कुल फरक विषय।"]},
+        {"id": "b", "query": "क्वेरी दुई?", "positive": "उत्तर दुई।"},
+        {"id": "c", "query": "क्वेरी तीन?", "positive": "उत्तर तीन।"},
+    ]
+    # Judge order for task a: positive, seed negative, then pool candidates "उत्तर दुई।", "उत्तर तीन।".
+    env = _verifying_env(['{"scores": [9, 0, 8, 1]}'], records)
+    task = env.load_tasks()[0]
+    result = await env.run_task(task)
+    row = result.metadata["retrieval_rows"][0]
+
+    assert row["negatives"] == ["बिल्कुल फरक विषय।", "उत्तर तीन।"]
+    assert row["negative_types"] == ["seed_verified", "mined_verified"]
+    assert row["below_target"] is False
+    audit = result.metadata["negative_audit"]
+    assert [item["text"] for item in audit["rejected_false_negatives"]] == ["उत्तर दुई।"]
+
+
+@pytest.mark.asyncio
+async def test_verify_stage_flags_short_rows_and_never_exports_unverified_negatives_on_judge_failure() -> None:
+    records = [
+        {"id": "a", "query": "क्वेरी एक?", "positive": "उत्तर एक।", "negatives": ["बिल्कुल फरक विषय।"]},
+        {"id": "b", "query": "क्वेरी दुई?", "positive": "उत्तर दुई।"},
+    ]
+    env = _verifying_env(['{"scores": [9, 0, 9]}', "not json at all"], records)
+    first, second = env.load_tasks()
+    short = await env.run_task(first)
+    assert short.metadata["retrieval_rows"][0]["negatives"] == ["बिल्कुल फरक विषय।"]
+    assert short.metadata["retrieval_rows"][0]["below_target"] is True
+
+    failed = await env.run_task(second)
+    assert failed.metadata["retrieval_rows"][0]["negatives"] == []
+    assert failed.metadata["retrieval_rows"][0]["below_target"] is True
+    assert failed.metadata["verification_errors"]
+
+
+def test_default_retriever_gets_e5_prefixes_from_settings(monkeypatch) -> None:
+    import gymkhana.envs.embedding_data.negatives as negatives
+
+    seen = {}
+
+    def fake_factory(model_name, query_prefix="", doc_prefix=""):
+        seen.update(model=model_name, query=query_prefix, doc=doc_prefix)
+        return lambda queries, passages, top_k: [list(range(len(passages))) for _ in queries]
+
+    monkeypatch.setattr(negatives, "sentence_transformer_retriever", fake_factory)
+    env = EmbeddingDataEnv(records=[{"id": "a", "query": "क्वेरी एक?", "positive": "उत्तर एक।"}])
+    env.embedding_config.embedding.verify_negatives = True
+    env.load_tasks()
+    assert seen == {"model": "intfloat/multilingual-e5-small", "query": "query: ", "doc": "passage: "}
+
+
+def test_missing_sentence_transformers_stops_with_install_hint(monkeypatch) -> None:
+    import sys
+
+    monkeypatch.setitem(sys.modules, "sentence_transformers", None)  # simulates a clean install
+    env = EmbeddingDataEnv(records=[{"id": "a", "query": "क्वेरी एक?", "positive": "उत्तर एक।"}])
+    env.embedding_config.embedding.verify_negatives = True
+    with pytest.raises(ImportError, match=r"gymkhana\[embedding\]"):
+        env.load_tasks()

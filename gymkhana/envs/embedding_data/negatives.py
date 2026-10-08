@@ -29,6 +29,31 @@ def _norm(text: str) -> str:
     return " ".join(unicodedata.normalize("NFC", text).split())
 
 
+def select_negatives(
+    candidates: Sequence[str],
+    candidate_scores: Sequence[float],
+    positive_score: float,
+    n_negatives: int,
+    *,
+    abs_threshold: float = 0.5,
+    margin: float = 0.1,
+) -> tuple[list[str], list[tuple[str, float]]]:
+    """Keep the first ``n_negatives`` candidates that are not likely false negatives.
+
+    A candidate is rejected when its relevance score is >= ``abs_threshold`` or
+    within ``margin`` of the positive's score. Returns (kept, rejected) with
+    rejected as (text, score) pairs, so callers can write an audit trail.
+    """
+    kept: list[str] = []
+    rejected: list[tuple[str, float]] = []
+    for text, score in zip(candidates, candidate_scores):
+        if score >= abs_threshold or score >= positive_score - margin:
+            rejected.append((text, score))
+        elif len(kept) < n_negatives:
+            kept.append(text)
+    return kept, rejected
+
+
 def mine_verified_negatives(
     rows: Iterable[Mapping[str, Any]],
     *,
@@ -73,14 +98,10 @@ def mine_verified_negatives(
         stats["candidates"] += len(candidates)
         scores = rerank([(query, positive)] + [(query, c) for c in candidates])
         pos_score, cand_scores = scores[0], scores[1:]
-        negatives: list[str] = []
-        for text, score in zip(candidates, cand_scores):
-            if score >= abs_threshold or score >= pos_score - margin:
-                stats["rejected_false_negative"] += 1
-                continue
-            negatives.append(text)
-            if len(negatives) == n_negatives:
-                break
+        negatives, rejected = select_negatives(
+            candidates, cand_scores, pos_score, n_negatives, abs_threshold=abs_threshold, margin=margin
+        )
+        stats["rejected_false_negative"] += len(rejected)
         row["negatives"] = negatives
         row["negative_types"] = [MINED_VERIFIED] * len(negatives)
         row["below_target"] = len(negatives) < n_negatives
@@ -89,9 +110,20 @@ def mine_verified_negatives(
     return out, stats
 
 
+_EXTRA_HINT = "install the optional embedding extra: pip install 'gymkhana[embedding]' (or: uv sync --extra embedding)"
+
+
+def _require_sentence_transformers() -> Any:
+    try:
+        import sentence_transformers
+    except ImportError as exc:
+        raise ImportError(f"sentence-transformers is required for this step; {_EXTRA_HINT}") from exc
+    return sentence_transformers
+
+
 def sentence_transformer_retriever(model_name: str, query_prefix: str = "", doc_prefix: str = "") -> Retriever:
     """Dense retriever; for e5 pass ``query_prefix='query: '``, ``doc_prefix='passage: '``."""
-    from sentence_transformers import SentenceTransformer
+    SentenceTransformer = _require_sentence_transformers().SentenceTransformer
 
     model = SentenceTransformer(model_name)
 
@@ -106,8 +138,8 @@ def sentence_transformer_retriever(model_name: str, query_prefix: str = "", doc_
 
 def cross_encoder_scorer(model_name: str = "BAAI/bge-reranker-v2-m3", batch_size: int = 32) -> Reranker:
     """Cross-encoder returning sigmoid probabilities."""
+    CrossEncoder = _require_sentence_transformers().CrossEncoder
     import torch
-    from sentence_transformers import CrossEncoder
 
     model = CrossEncoder(model_name, activation_fn=torch.nn.Sigmoid())
 
@@ -123,5 +155,6 @@ __all__ = [
     "Retriever",
     "cross_encoder_scorer",
     "mine_verified_negatives",
+    "select_negatives",
     "sentence_transformer_retriever",
 ]
