@@ -279,3 +279,29 @@ async def test_verify_stage_flags_short_rows_and_never_exports_unverified_negati
     assert failed.metadata["retrieval_rows"][0]["negatives"] == []
     assert failed.metadata["retrieval_rows"][0]["below_target"] is True
     assert failed.metadata["verification_errors"]
+
+
+def test_default_retriever_gets_e5_prefixes_from_settings(monkeypatch) -> None:
+    import gymkhana.envs.embedding_data.negatives as negatives
+
+    seen = {}
+
+    def fake_factory(model_name, query_prefix="", doc_prefix=""):
+        seen.update(model=model_name, query=query_prefix, doc=doc_prefix)
+        return lambda queries, passages, top_k: [list(range(len(passages))) for _ in queries]
+
+    monkeypatch.setattr(negatives, "sentence_transformer_retriever", fake_factory)
+    env = EmbeddingDataEnv(records=[{"id": "a", "query": "क्वेरी एक?", "positive": "उत्तर एक।"}])
+    env.embedding_config.embedding.verify_negatives = True
+    env.load_tasks()
+    assert seen == {"model": "intfloat/multilingual-e5-small", "query": "query: ", "doc": "passage: "}
+
+
+def test_missing_sentence_transformers_stops_with_install_hint(monkeypatch) -> None:
+    import sys
+
+    monkeypatch.setitem(sys.modules, "sentence_transformers", None)  # simulates a clean install
+    env = EmbeddingDataEnv(records=[{"id": "a", "query": "क्वेरी एक?", "positive": "उत्तर एक।"}])
+    env.embedding_config.embedding.verify_negatives = True
+    with pytest.raises(ImportError, match=r"gymkhana\[embedding\]"):
+        env.load_tasks()

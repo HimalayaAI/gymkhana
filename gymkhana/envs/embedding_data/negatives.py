@@ -110,9 +110,20 @@ def mine_verified_negatives(
     return out, stats
 
 
+_EXTRA_HINT = "install the optional embedding extra: pip install 'gymkhana[embedding]' (or: uv sync --extra embedding)"
+
+
+def _require_sentence_transformers() -> Any:
+    try:
+        import sentence_transformers
+    except ImportError as exc:
+        raise ImportError(f"sentence-transformers is required for this step; {_EXTRA_HINT}") from exc
+    return sentence_transformers
+
+
 def sentence_transformer_retriever(model_name: str, query_prefix: str = "", doc_prefix: str = "") -> Retriever:
     """Dense retriever; for e5 pass ``query_prefix='query: '``, ``doc_prefix='passage: '``."""
-    from sentence_transformers import SentenceTransformer
+    SentenceTransformer = _require_sentence_transformers().SentenceTransformer
 
     model = SentenceTransformer(model_name)
 
@@ -127,8 +138,8 @@ def sentence_transformer_retriever(model_name: str, query_prefix: str = "", doc_
 
 def cross_encoder_scorer(model_name: str = "BAAI/bge-reranker-v2-m3", batch_size: int = 32) -> Reranker:
     """Cross-encoder returning sigmoid probabilities."""
+    CrossEncoder = _require_sentence_transformers().CrossEncoder
     import torch
-    from sentence_transformers import CrossEncoder
 
     model = CrossEncoder(model_name, activation_fn=torch.nn.Sigmoid())
 

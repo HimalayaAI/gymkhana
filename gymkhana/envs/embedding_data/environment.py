@@ -66,6 +66,9 @@ class EmbeddingDataSettings(BaseModel):
     negative_target: int = Field(default=5, ge=1, le=32)
     negative_pool_path: Optional[str] = None  # jsonl with "text" (or "positive") per line; default: positives of the loaded rows
     negative_retriever_model: str = "intfloat/multilingual-e5-small"
+    # e5 models need these prefixes; set both to "" for a model that does not use them.
+    negative_retriever_query_prefix: str = "query: "
+    negative_retriever_doc_prefix: str = "passage: "
     negative_candidates: int = Field(default=12, ge=1, le=64)
     negative_false_threshold: float = Field(default=0.5, ge=0.0, le=1.0)
     negative_false_margin: float = Field(default=0.1, ge=0.0, le=1.0)
@@ -410,7 +413,11 @@ class EmbeddingDataEnv(Environment):
         if retrieve is None:
             from gymkhana.envs.embedding_data.negatives import sentence_transformer_retriever
 
-            retrieve = sentence_transformer_retriever(settings.negative_retriever_model)
+            retrieve = sentence_transformer_retriever(
+                settings.negative_retriever_model,
+                settings.negative_retriever_query_prefix,
+                settings.negative_retriever_doc_prefix,
+            )
         queries = [task.metadata["seed_query"] for task in tasks]
         ranked = retrieve(queries, pool, settings.negative_candidates + 4) if tasks and pool else [[] for _ in tasks]
         positives_by_query: dict[str, set[str]] = {}
