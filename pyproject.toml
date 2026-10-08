@@ -15,7 +15,7 @@ dependencies = [
   "pydantic-ai>=2.19,<3",  # ModelHTTPError(headers=...) landed in 2.19.0
   "python-dotenv>=1.0",
   "jsonschema>=4.20",
-  "openai>=1.6",
+  "openai>=3.26.0",
   "anthropic>=0.18",
   "requests>=2.31",
   "aiohttp>=3.9",

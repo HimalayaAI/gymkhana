@@ -137,6 +137,34 @@ for candidate in group.candidates:
 Candidates retain their task ID, rollout-group ID, and ordered sample index so
 rewards and exports can be compared within the correct group.
 
+### Typed decisions with OpenAI
+
+For classification or verification that needs a typed decision rather than
+generated text, use `OpenAIDecisionService` alongside the rollout inference
+service. It wraps the OpenAI Decisions API and returns the SDK response
+unchanged, including probabilities, confidence, and refusals:
+
+```python
+from gymkhana.core.services.inference import OpenAIDecisionService
+
+decisions = OpenAIDecisionService()  # reads OPENAI_API_KEY
+result = await decisions.decide(
+    input="Query: ...\nCandidate passage: ...",
+    questions=[
+        {
+            "type": "predicate",
+            "name": "answers_query",
+            "instructions": "Does the passage contain enough information to answer the query?",
+        }
+    ],
+)
+```
+
+This is a separate typed-decision path; it does not replace text generation or
+the existing `InferenceService` contract. The current default model is
+`gpt-6-luna`; callers can override it per service or request. The Python SDK
+dependency is pinned to a minimum version that includes the Decisions API.
+
 ## Built-in RAG verifiers
 
 `gymkhana.verifiers.rag` provides reusable external metrics for retrieval
