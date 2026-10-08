@@ -122,6 +122,42 @@ negative list and does not guarantee five negatives per positive. Meeting the
 5:1 target requires a negative-mining/export step; keep the original seed
 labels identifiable in provenance.
 
+### Future extension: typed decision-model verification
+
+The current optional judge uses a general-purpose LLM. A later verifier
+backend could use a decision model to return typed answerability judgments
+instead of generating free-form explanations. For each query and candidate
+passage, ask whether the passage contains enough information to answer the
+query, then retain the structured decision, confidence/probability, model ID,
+and verifier version in the audit record. Apply calibrated thresholds to both
+the positive and each negative; route uncertain or malformed results to a
+fallback judge or human review. A decision model is a verifier signal, not a
+source of legal or domain truth, and the five-negative target still requires
+five individually verified negatives per positive.
+
+OpenAI's Decisions API is a possible backend for typed predicates, choices,
+and rubric scores. Its integration should be an explicit decision-service
+path alongside ordinary text generation, since it is a typed decision API
+rather than a prose-generation endpoint. The API is currently documented as a
+public beta with `gpt-6-luna`; validate Nepali and Romanized Nepali judgments
+on a labeled sample before using it for bulk filtering. See the [OpenAI
+Decisions guide](https://developers.openai.com/api/docs/guides/decisions) and
+[Python SDK reference](https://developers.openai.com/api/reference/python/resources/decisions/methods/create).
+
+TypeSafe's Jev, available through Pydantic AI's `TypeSafeModel`, is another
+candidate for typed decisions and per-field confidence. Treat it as an
+optional provider: calibrate it against reviewed Nepali examples, and pin a
+model version once thresholds are established because a moving alias such as
+`jev-latest` can change behavior. See [Pydantic AI's TypeSafe
+model docs](https://pydantic.dev/docs/ai/models/typesafe/) and [TypeSafe's
+Jev announcement](https://typesafe.ai/blog/introducing-system-one-models-and-jev).
+
+Before either backend becomes a default, compare it with the current LLM
+judge on a human-labeled set that includes same-query duplicate positives,
+near-duplicate passages, cross-script queries, and borderline answerability.
+Measure false-negative acceptance and positive rejection separately, and
+record calibration results with the verifier configuration.
+
 Run a small generation pass:
 
 ```bash
