@@ -31,6 +31,18 @@ Generated paraphrases are attached to the seed positive and negatives. Seed
 rows themselves are preserved as the baseline labels. The judge is a filter,
 not legal validation; generated examples should be sampled for human review.
 
+## Negative verification stage (optional)
+
+Set `embedding.verify_negatives: true` to verify and fill negatives inside the run:
+
+- `load_tasks` retrieves near-neighbour passages for each row from a pool (`embedding.negative_pool_path`, a JSONL with a `text` field, plus the positives of the loaded rows). The retriever is `embedding.negative_retriever_model` (default `intfloat/multilingual-e5-small`, runs on CPU). The row's own positive and the positives of rows with the same query are never candidates.
+- The seed negatives are verified first, then the mined candidates. One LLM call scores the positive and every candidate from 0 to 10 for "contains the answer". A candidate is rejected as a likely false negative at a score of 0.5 or more (`negative_false_threshold`) or within 0.1 of the positive's score (`negative_false_margin`).
+- The first `embedding.negative_target` survivors (default 5) are exported with `negative_types` `seed_verified` or `mined_verified`. Rows with fewer survivors are kept and flagged `below_target: true`; nothing is padded.
+- If the judge call fails, the row is exported with no negatives, flagged `below_target`, and the error is recorded. Unverified negatives are never exported while this stage is on.
+- The audit file gets a `negative_audit` entry per row: the positive's score, the rejected candidates with scores, and the below-target flag.
+
+The judge uses the environment's configured LLM, so it runs on API credits and needs no GPU. `gymkhana.envs.embedding_data.negatives` also offers a local cross-encoder scorer for offline use (`postprocess` CLI).
+
 ## Suggested augmentation approaches
 
 The current method is **label-preserving query augmentation**: change the
