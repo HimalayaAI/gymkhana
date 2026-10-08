@@ -59,6 +59,7 @@ than provider SDKs.
 | `swe` | Software-engineering tasks in a sandbox |
 | `tool-use-singleturn` | Verifiable single-turn tool use |
 | `multilingual-tool-use` | xlam tool use with the user query localized (Nepali or any `LanguageSpec`) |
+| `embedding-data` | Configurable seed-based query/positive/negative retrieval data for embedding fine-tuning |
 
 ## Installation
 

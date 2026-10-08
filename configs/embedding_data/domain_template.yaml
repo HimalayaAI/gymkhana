@@ -1,0 +1,46 @@
+# Copy this for another domain or seed dataset. Only map the seed columns and
+# change domain instructions; the same environment code handles all domains.
+name: embedding-data
+
+llm:
+  model: google:gemini-3.8-flash
+  client: google
+  temperature: 0.3
+  max_tokens: 1200
+
+dataset:
+  dataset_name: organization/domain-retrieval-seed
+  dataset_backend: huggingface
+  dataset_config: default
+  dataset_split: train
+  limit: 100
+  output_dir: outputs/embedding_data/domain
+  output_basename: domain_retrieval_pairs
+  output_sharegpt: false
+  output_audit_jsonl: true
+  field_mapping:
+    id: id
+    query: query
+    positive: positive
+    negatives: negatives
+    source: source
+    document: document
+    license: license
+    script: script
+
+embedding:
+  domain: general
+  domain_instructions: >-
+    Generate faithful search-query paraphrases. Preserve the original intent,
+    constraints, names, dates, quantities, and polarity. Do not answer the query.
+  language: en
+  query_script: Latn
+  positive_script: Latn
+  min_script_ratio: 0.5
+  seed_negative_label: seed_unreviewed
+  generate_paraphrases: true
+  paraphrases_per_query: 1
+  max_negative_count: 8
+  semantic_acceptance_threshold: 0.8
+  require_semantic_judge: true
+  include_seed_rows: true

@@ -1,0 +1,52 @@
+# Configurable seed mapping for the Nepali legal QA contrastive dataset.
+name: embedding-data
+
+llm:
+  model: google:gemini-3.8-flash
+  client: google
+  temperature: 0.3
+  max_tokens: 1200
+
+dataset:
+  dataset_name: Somtharu181coder/jiban4_law_qa_clean
+  dataset_backend: huggingface-rows
+  dataset_config: default
+  dataset_split: train
+  dataset_offset: 0
+  limit: 10
+  batch_size: 2
+  num_rollouts: 1
+  enable_rewards: true
+  output_sharegpt: false
+  output_audit_jsonl: true
+  incremental_export: false
+  output_dir: outputs/embedding_data/nepali_legal
+  output_basename: nepali_law_retrieval
+  field_mapping:
+    id: id
+    query: query
+    positive: positive
+    negatives: negatives
+    source: source
+    document: doc_name
+    license: license
+    script: script
+
+embedding:
+  domain: Nepali legal retrieval
+  domain_instructions: >-
+    Preserve the exact legal intent, parties, conditions, dates, amounts,
+    rights, duties, and polarity. Do not add legal facts or answer the question.
+  language: Nepali
+  query_script: ne-Deva
+  positive_script: ne-Deva
+  min_script_ratio: 0.5
+  seed_negative_label: seed_unreviewed
+  generate_paraphrases: true
+  paraphrases_per_query: 1
+  max_negative_count: 2
+  semantic_acceptance_threshold: 0.8
+  train_fraction: 0.9
+  validation_fraction: 0.05
+  require_semantic_judge: true
+  include_seed_rows: true

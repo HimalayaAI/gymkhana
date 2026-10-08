@@ -23,6 +23,7 @@ from .romanized_nepali import RomanizedNepaliEnv  # noqa: F401
 from .english_sharegpt_nepali import EnglishShareGPTToNepaliEnv  # noqa: F401
 from .multi_turn_qa import MultiTurnQAEnv  # noqa: F401
 from .multilingual_tool_use import MultilingualToolUseEnv  # noqa: F401
+from .embedding_data import EmbeddingDataEnv  # noqa: F401
 
 __all__ = [
     "ENVIRONMENTS",
@@ -40,4 +41,5 @@ __all__ = [
     "RomanizedNepaliEnv",
     "EnglishShareGPTToNepaliEnv",
     "MultiTurnQAEnv",
+    "EmbeddingDataEnv",
 ]

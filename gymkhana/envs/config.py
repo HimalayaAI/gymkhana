@@ -61,6 +61,7 @@ class EnvironmentType(str, Enum):
     ROMANIZED_NEPALI = "romanized-nepali"
     ENGLISH_SHAREGPT_TO_NEPALI = "english-sharegpt-to-nepali"
     MULTI_TURN_QA = "multi-turn-qa"
+    EMBEDDING_DATA = "embedding-data"
 
 
 class REPLSettings(BaseModel):
