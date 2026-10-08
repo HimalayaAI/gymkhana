@@ -31,6 +31,55 @@ Generated paraphrases are attached to the seed positive and negatives. Seed
 rows themselves are preserved as the baseline labels. The judge is a filter,
 not legal validation; generated examples should be sampled for human review.
 
+## Proposed corpus-mining environment and benchmark dataset
+
+The current `embedding-data` environment only augments queries while keeping
+seed positives and negatives fixed. A separate corpus-mining environment could
+generate and verify positive and negative passage labels for a query; this is a
+proposal, not part of the current implementation.
+
+Use the [Nepali Embedding Bench](https://huggingface.co/datasets/W4ashabii/Embedding_Bench)
+as the output-schema reference. Keep a corpus table keyed by `pid` with passage
+text and provenance, and a query table keyed by `qid` with query metadata and
+relevant/irrelevant passage IDs:
+
+```json
+{
+  "qid": "legal_000001",
+  "query": "कानुनी प्रश्न यहाँ",
+  "domain": "legal",
+  "subdomain": "family/marriage",
+  "positives": [{"pid": "legal_p000144"}],
+  "negatives": [{"pid": "legal_p000994"}],
+  "source": "Somtharu181coder/jiban4_law_qa_clean",
+  "source_id": "seed-row-id",
+  "language": "ne",
+  "script": "Deva"
+}
+```
+
+Each corpus passage should carry `pid`, `text`, `domain`, `subdomain`,
+`source`, `source_id` or document/chunk ID, source URL when available, and
+license. Keep the benchmark-style domain partitions named `news`, `legal`,
+`health`, and `textbook`; keep any train/validation/test assignment as a
+separate field and group it by source document to prevent passage leakage.
+
+### Suggested initial domain partitions
+
+| Partition | Seed/source | Positive passage and negative strategy | Initial target |
+| --- | --- | --- | ---: |
+| `news` | [HimalayaAI Nepali news corpus](https://huggingface.co/datasets/himalaya-ai/nepali-news-corpus) | Chunk articles as positives; generate information-seeking queries; mine negatives from nearby stories that do not answer the query. | 4–5k triplets |
+| `legal` | [Nepali legal QA seed](https://huggingface.co/datasets/Somtharu181coder/jiban4_law_qa_clean) and [bilingual law RAG QA](https://huggingface.co/datasets/chhatramani/nepal_5_law_RAG_QA) | Prefer the cited law section or retrieved context as the positive passage; use other sections from the same law as hard negatives only after checking they do not answer the query. | 4–5k triplets |
+| `health` | [Nepali Health QA](https://huggingface.co/datasets/NepaliAI/Nepali-Health-QA) plus vetted health guidance | Use an authoritative, reviewed guidance passage as the positive; retrieve topic-similar passages for candidate negatives and review health labels before export. | 3–5k triplets |
+| `textbook` | [Nepali textbook QA](https://huggingface.co/datasets/dineshkarki/textbook-qa-nepali-multiturn) | Use the matching textbook context/chunk as the positive; use nearby chapter passages as candidate negatives after answerability checks. | 4–5k triplets |
+
+The target is **15–20k expanded `(query, positive, negative)` triplets** across
+the four partitions. Report both the number of unique `qid`s and the expanded
+triplet count, since each query can have multiple positives and negatives.
+Preserve original source text as corpus passages; generated content should
+create queries or propose candidate labels, with verification before a label
+enters the training set.
+
 Run a small generation pass:
 
 ```bash
