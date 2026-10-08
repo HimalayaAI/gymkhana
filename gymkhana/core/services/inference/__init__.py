@@ -2,6 +2,7 @@
 
 from gymkhana.core.services.inference.base import InferenceService, StructuredOutputT
 from gymkhana.core.services.inference.pydantic_ai import PydanticAIInferenceService
+from gymkhana.core.services.inference.openai_decisions import OpenAIDecisionService
 from gymkhana.core.services.inference.parallel_inference import ParallelInferenceService
 from gymkhana.core.services.inference.sub_llm import SubLLMOrchestrator
 from gymkhana.core.services.inference.rollouts import (
@@ -15,6 +16,7 @@ __all__ = [
     "InferenceService",
     "StructuredOutputT",
     "PydanticAIInferenceService",
+    "OpenAIDecisionService",
     "ParallelInferenceService",
     "SubLLMOrchestrator",
     "RolloutCandidate",
